@@ -43,7 +43,6 @@ def evaluate_one_setting(calib_data, retriever, reranker, generator,
 
         # 3) Generator
         contexts = reranked[:N_rag]
-        contexts = reranked[:N_rag]
 
         generation_set = generator.generate_answers(
             q,
@@ -52,7 +51,11 @@ def evaluate_one_setting(calib_data, retriever, reranker, generator,
             lambda_s=lambda_s
         )
 
-        gen_risk, C_i = generator_fail(generation_set, gold_answer, tau_3)
+        gen_risk, C_i = generator_fail(
+            generation_set=generation_set,
+            gold_answer=gold_answer,
+            tau_3=tau_3
+        )
 
         C_list.append(C_i)
 
