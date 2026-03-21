@@ -26,4 +26,4 @@ class SearchGrid:
 @dataclass
 class ModelConfig:
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    ollama_model: str = "phi3:mini"
+    ollama_model: str = "llama3.1:8b"

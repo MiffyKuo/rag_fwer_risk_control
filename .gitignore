@@ -5,5 +5,4 @@ __pycache__/
 .vscode/
 .ipynb_checkpoints/
 vectorstore/
-
 models/
