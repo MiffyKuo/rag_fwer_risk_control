@@ -7,3 +7,10 @@ sentence-transformers
 scikit-learn
 rouge-score
 datasets
+langchain-openai
+openai
+sentence-transformers
+faiss-cpu
+rouge-score
+scikit-learn
+numpy

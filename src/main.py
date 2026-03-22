@@ -16,11 +16,11 @@ from pipeline import RiskControlledRAG
 def main():
     # 使用者只輸入整體 FWER
     risk_cfg = RiskConfig(
-    alpha_total=0.5,
-    tau_1=0.0,
-    tau_2=0.0,
-    tau_3=0.0
-)
+    alpha_total=0.30,   # 先用 0.30 或 0.40 測試
+    tau_1=0.0,          # retriever 先保留 binary fail
+    tau_2=0.0,          # reranker 先保留 binary fail
+    tau_3=0.60          # 生成風險容忍門檻，不能設 0
+    )
 
     # alpha_grid = AlphaGrid()
     grid_cfg = SearchGrid()
@@ -32,7 +32,7 @@ def main():
     retriever = RetrieverModule(model_cfg.embedding_model)
     retriever.build_index(corpus)
 
-    reranker = SimpleReranker(model_cfg.embedding_model)
+    reranker = SimpleReranker(model_cfg.reranker_model)
     generator = GeneratorModule(model_cfg.ollama_model)
 
     best_params, all_results, feasible_results = grid_search(

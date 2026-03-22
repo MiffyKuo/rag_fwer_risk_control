@@ -1,21 +1,35 @@
-from langchain_ollama import ChatOllama
-from difflib import SequenceMatcher
+import json
+import hashlib
+from pathlib import Path
 from typing import List
-
+from langchain_openai import ChatOpenAI
+from difflib import SequenceMatcher
 
 class GeneratorModule:
-    def __init__(self, model_name: str = "llama3.1:8b", temperature: float = 0.7):
+    def __init__(
+        self,
+        model_name: str = "gpt-4.1-mini",
+        temperature: float = 0.0,
+        cache_path: str = "data/generator_cache.json"
+    ):
         self.model_name = model_name
         self.temperature = temperature
-        self.llm = ChatOllama(
-            model=model_name,
-            temperature=temperature
-        )
+        self.llm = ChatOpenAI(model=model_name, temperature=temperature)
+        self.cache_path = Path(cache_path)
+        self.cache = self._load_cache()
+
+    def _load_cache(self):
+        if self.cache_path.exists():
+            with open(self.cache_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {}
+
+    def _save_cache(self):
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.cache_path, "w", encoding="utf-8") as f:
+            json.dump(self.cache, f, ensure_ascii=False, indent=2)
 
     def build_prompt(self, question: str, contexts: List) -> str:
-        """
-        Build a QA prompt from retrieved/reranked contexts.
-        """
         context_texts = []
         for i, doc in enumerate(contexts, 1):
             text = getattr(doc, "page_content", str(doc))
@@ -26,7 +40,7 @@ class GeneratorModule:
         prompt = f"""
 You are a helpful question-answering assistant.
 Answer the question only based on the provided documents.
-If the answer is not supported by the documents, say you do not know.
+If the answer is not supported by the documents, say "I do not know".
 
 Documents:
 {joined_context}
@@ -36,41 +50,33 @@ Question:
 
 Answer:
 """.strip()
-
         return prompt
 
+    def _cache_key(self, prompt: str, lambda_g: int, lambda_s: float):
+        raw = f"{self.model_name}|{self.temperature}|{lambda_g}|{lambda_s}|{prompt}"
+        return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
     def generate_answer(self, question: str, contexts: List) -> str:
-        """
-        Generate a single answer.
-        This keeps backward compatibility with your original pipeline.
-        """
         prompt = self.build_prompt(question, contexts)
         response = self.llm.invoke(prompt)
         return response.content.strip()
 
     def answer_similarity(self, text1: str, text2: str) -> float:
-        """
-        Simple string-level similarity.
-        Used to avoid collecting near-duplicate answers.
-        """
         return SequenceMatcher(None, text1, text2).ratio()
 
     def generate_answers(
         self,
         question: str,
         contexts: List,
-        lambda_g: int = 3,
+        lambda_g: int = 2,
         lambda_s: float = 0.8,
-        max_retry: int = 20
+        max_retry: int = 6
     ) -> List[str]:
-        """
-        Generate a set of candidate answers.
-
-        lambda_g: target number of kept answers
-        lambda_s: similarity threshold; if new answer is too similar
-                  to existing ones, discard it
-        """
         prompt = self.build_prompt(question, contexts)
+        key = self._cache_key(prompt, lambda_g, lambda_s)
+
+        if key in self.cache:
+            return self.cache[key]
 
         answers = []
         tries = 0
@@ -83,22 +89,19 @@ Answer:
                 tries += 1
                 continue
 
-            too_similar = False
-            for old_ans in answers:
-                sim = self.answer_similarity(candidate, old_ans)
-                if sim > lambda_s:
-                    too_similar = True
-                    break
+            too_similar = any(
+                self.answer_similarity(candidate, old_ans) > lambda_s
+                for old_ans in answers
+            )
 
             if not too_similar:
                 answers.append(candidate)
 
             tries += 1
 
-        # fallback: at least one answer
         if len(answers) == 0:
-            response = self.llm.invoke(prompt)
-            fallback = response.content.strip()
-            answers.append(fallback if fallback else "I do not know.")
+            answers = ["I do not know."]
 
+        self.cache[key] = answers
+        self._save_cache()
         return answers
