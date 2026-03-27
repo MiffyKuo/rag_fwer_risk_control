@@ -29,7 +29,7 @@ class ModelConfig:
     reranker_model: str = "BAAI/bge-reranker-base"
 
     # gpt-oss
-    generator_model: str = "openai/gpt-oss-120b"
+    generator_model: str = "openai/gpt-oss-20b"
     generator_api_base: str = os.getenv("GPTOSS_BASE_URL", "")
     generator_api_key: str = os.getenv("GPTOSS_API_KEY", "dummy")
 
