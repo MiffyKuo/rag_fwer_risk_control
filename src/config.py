@@ -13,11 +13,11 @@ class RiskConfig:
 
 @dataclass
 class SearchGrid:
-    top_k_list: list = field(default_factory=lambda: [5, 10, 20, 30, 50, 80])
-    top_K_list: list = field(default_factory=lambda: [1, 2, 3, 5, 8, 10])
-    N_rag_list: list = field(default_factory=lambda: [1, 2, 3, 5])
-    lambda_g_list: list = field(default_factory=lambda: [1, 2, 3, 4])
-    lambda_s_list: list = field(default_factory=lambda: [0.70, 0.80, 0.90])
+    top_k_list: list = field(default_factory=lambda: [20, 40, 60, 80, 100, 150])
+    top_K_list: list = field(default_factory=lambda: [1, 2, 3, 5, 8, 10, 15, 20])
+    N_rag_list: list = field(default_factory=lambda: [3, 5, 8, 10, 15])
+    lambda_g_list: list = field(default_factory=lambda: [1, 2, 4, 6, 8])
+    lambda_s_list: list = field(default_factory=lambda: [0.60, 0.70, 0.80, 0.90, 0.95])
 
 @dataclass
 class ModelConfig:

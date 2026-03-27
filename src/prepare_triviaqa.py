@@ -8,7 +8,7 @@ OUTPUT_DIR = Path("data")
 
 TRAIN_SLICE = "train[:200]"
 VALID_SLICE = "validation[:100]"
-MAX_CONTEXT_CHARS = 400
+MAX_CONTEXT_CHARS = 1500
 
 
 def save_jsonl(rows, path: Path):
@@ -88,38 +88,39 @@ def extract_qid(row, fallback_idx):
 
 
 def extract_context_and_title(row):
-    """
-    嘗試從 entity_pages / search_results 裡抓出第一段可用 context
-    """
-    candidate_blocks = [
-        row.get("entity_pages"),
-        row.get("search_results")
-    ]
+    candidates = []
 
-    title_keys = ["title", "titles"]
-    context_keys = [
-        "wiki_context",
-        "search_context",
-        "description",
-        "content",
-        "text",
-        "context"
-    ]
+    # entity_pages
+    entity_pages = row.get("entity_pages")
+    if isinstance(entity_pages, dict):
+        titles = entity_pages.get("title", [])
+        contexts = entity_pages.get("wiki_context", [])
+        for t, c in zip(titles, contexts):
+            if c and str(c).strip():
+                candidates.append((t, str(c).strip()))
 
-    for block in candidate_blocks:
-        if not isinstance(block, dict):
-            continue
+    # search_results
+    search_results = row.get("search_results")
+    if isinstance(search_results, dict):
+        titles = search_results.get("title", [])
+        contexts = search_results.get("search_context", [])
+        descs = search_results.get("description", [])
+        for t, c, d in zip(titles, contexts, descs):
+            text = c if c and str(c).strip() else d
+            if text and str(text).strip():
+                candidates.append((t, str(text).strip()))
 
-        title = get_nested_first_text(block, title_keys)
-        context = get_nested_first_text(block, context_keys)
+    if not candidates:
+        return None, None
 
-        if context:
-            context = context.strip()
-            if len(context) > MAX_CONTEXT_CHARS:
-                context = context[:MAX_CONTEXT_CHARS]
-            return title, context
+    # 先選最長的 context
+    candidates.sort(key=lambda x: len(x[1]), reverse=True)
+    title, context = candidates[0]
 
-    return None, None
+    if len(context) > MAX_CONTEXT_CHARS:
+        context = context[:MAX_CONTEXT_CHARS]
+
+    return title, context
 
 
 def row_to_example(row, idx, prefix):

@@ -37,16 +37,15 @@ def evaluate_one_setting(
     rerank_cache,
     gen_cache
 ):
-    A_list = []
-    B_list = []
-    C_list = []
+    A_list, B_list, C_list = [], [], []
+    fail_cases = {"retriever": [], "reranker": [], "generator": []}
 
     for row in calib_data:
+        qid = row["qid"]
         q = row["question"]
         gold_doc_id = row["gold_doc_id"]
         gold_answer = row["gold_answer"]
 
-        # 1) Retriever cache
         ret_key = (q, top_k)
         if ret_key not in retrieve_cache:
             retrieve_cache[ret_key] = retriever.retrieve(q, top_k=top_k)
@@ -55,9 +54,9 @@ def evaluate_one_setting(
         _, A_i = retriever_fail(retrieved, gold_doc_id, tau_1)
         A_list.append(A_i)
         if A_i == 1:
+            fail_cases["retriever"].append(qid)
             continue
 
-        # 2) Reranker cache
         rerank_key = (q, top_k, top_K)
         if rerank_key not in rerank_cache:
             rerank_cache[rerank_key] = reranker.rerank(q, retrieved, top_K=top_K)
@@ -66,25 +65,22 @@ def evaluate_one_setting(
         _, B_i = reranker_fail(reranked, gold_doc_id, tau_2)
         B_list.append(B_i)
         if B_i == 1:
+            fail_cases["reranker"].append(qid)
             continue
 
-        # 3) Generator cache
         contexts = reranked[:N_rag]
         doc_ids = tuple(d.metadata["doc_id"] for d in contexts)
         gen_key = (q, doc_ids, lambda_g, lambda_s)
-
         if gen_key not in gen_cache:
             gen_cache[gen_key] = generator.generate_answers(
                 q, contexts, lambda_g=lambda_g, lambda_s=lambda_s
             )
         generation_set = gen_cache[gen_key]
 
-        gen_risk, C_i = generator_fail(
-            generation_set=generation_set,
-            gold_answer=gold_answer,
-            tau_3=tau_3
-        )
+        _, C_i = generator_fail(generation_set, gold_answer, tau_3=tau_3)
         C_list.append(C_i)
+        if C_i == 1:
+            fail_cases["generator"].append(qid)
 
     fwer_1 = sum(A_list) / max(len(A_list), 1)
     fwer_2 = sum(B_list) / max(len(B_list), 1)
@@ -99,6 +95,7 @@ def evaluate_one_setting(
         "FWER_1": fwer_1,
         "FWER_2": fwer_2,
         "FWER_3": fwer_3,
+        "fail_cases": fail_cases,
     }
 
 def grid_search(calib_data, retriever, reranker, generator, risk_cfg, grid_cfg):
