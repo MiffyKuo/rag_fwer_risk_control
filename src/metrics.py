@@ -27,31 +27,21 @@ def normalize_text(s: str) -> str:
     s = re.sub(r"\s+", " ", s)
     return s
 
-# def generator_fail(pred_answer, gold_answer, tau_3=0.0):
-#     pred = normalize_text(pred_answer)
-#     gold = normalize_text(gold_answer)
 
-#     # 只要 gold answer 出現在模型答案裡，就視為成功
-#     correct = gold in pred
-
-#     risk = 0.0 if correct else 1.0
-#     C_i = int(risk > tau_3)
-#     return risk, C_i
-
-# from rouge_score import rouge_scorer
-
-def generator_fail(generation_set, gold_answer, tau_3):
-    scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=True)
+def generator_fail(generation_set, gold_answer, tau_3=0.0):
+    gold = normalize_text(gold_answer)
 
     if len(generation_set) == 0:
         return 1.0, 1
 
-    best_rouge = max(
-        scorer.score(gold_answer, ans)["rougeL"].fmeasure
-        for ans in generation_set
-    )
+    hit = 0
+    for ans in generation_set:
+        pred = normalize_text(ans)
+        if gold in pred:
+            hit = 1
+            break
 
-    risk = 1.0 - best_rouge
+    risk = 0.0 if hit else 1.0
     fail = int(risk > tau_3)
     return risk, fail
 

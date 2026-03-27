@@ -44,8 +44,14 @@ def main():
 
     if best_params is None:
         print("找不到滿足整體 FWER 門檻的參數組合。")
-        print("\n各組模型參數的原始結果如下：")
-        for r in all_results:
+
+        ranked = sorted(
+            all_results,
+            key=lambda x: (x["FWER_3"], x["FWER_2"], x["FWER_1"], -x["top_k"], -x["lambda_g"])
+        )
+
+        print("\n最接近可行的前 10 組：")
+        for r in ranked[:10]:
             print(r)
         return
 

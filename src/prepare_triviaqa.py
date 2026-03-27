@@ -5,9 +5,9 @@ from pprint import pprint
 
 OUTPUT_DIR = Path("data")
 
-# 先縮小，確保一定跑得動
-TRAIN_SLICE = "train[:5]"
-VALID_SLICE = "validation[:3]"
+
+TRAIN_SLICE = "train[:200]"
+VALID_SLICE = "validation[:100]"
 MAX_CONTEXT_CHARS = 400
 
 
