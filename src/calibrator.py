@@ -272,13 +272,9 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
 
             if top_K > top_k:
                 continue
-            if N_rag > top_K:
-                continue
             if top_K < MIN_TOP_K:
                 continue
-            if N_rag < MIN_N_RAG:
-                continue
-
+            
             s12 = evaluate_stage12(
                 calib_data=calib_data,
                 retriever=retriever,
