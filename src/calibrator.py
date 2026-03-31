@@ -31,21 +31,26 @@ def solve_alpha_3(alpha_total, alpha_1, alpha_2):
 # top-k 自動產生函數
 def auto_top_k_candidates(calib_data, retriever, search_cfg):
     """
-    Data-driven top-k candidates (multi-gold version):
-    對每個 query，找第一個 relevant doc 出現的位置
+    Multi-gold version:
+    對每個 query，找第一個 relevant doc 出現的位置，
+    再根據這個位置產生 top-k 候選。
     """
     ranks = set()
 
     for row in calib_data:
         q = row["question"]
-        gold_doc_ids = set(row["gold_doc_ids"])
+
+        gold_doc_ids = row.get("gold_doc_ids")
+        if gold_doc_ids is None:
+            gold_doc_ids = [row["gold_doc_id"]]
+        gold_set = set(gold_doc_ids)
 
         docs = retriever.retrieve(q, top_k=search_cfg.max_top_k)
 
         found_rank = None
         for idx, d in enumerate(docs, start=1):
             doc_id = d.metadata.get("doc_id", None)
-            if doc_id in gold_doc_ids:
+            if doc_id in gold_set:
                 found_rank = idx
                 break
 
@@ -58,7 +63,7 @@ def auto_top_k_candidates(calib_data, retriever, search_cfg):
     anchors = [
         search_cfg.min_top_k,
         10, 20, 30, 50,
-        search_cfg.max_top_k
+        search_cfg.max_top_k,
     ]
     for a in anchors:
         if search_cfg.min_top_k <= a <= search_cfg.max_top_k:
@@ -159,6 +164,11 @@ def evaluate_one_setting(
     A_list, B_list, C_list = [], [], []
     fail_cases = {"retriever": [], "reranker": [], "generator": []}
 
+    # 方便 debug：記錄每一關實際有多少題進來
+    n_stage1 = 0
+    n_stage2 = 0
+    n_stage3 = 0
+
     for row in calib_data:
         qid = row["qid"]
         q = row["question"]
@@ -167,7 +177,12 @@ def evaluate_one_setting(
         gold_doc_ids = row.get("gold_doc_ids")
         if gold_doc_ids is None:
             gold_doc_ids = [row["gold_doc_id"]]
-            
+
+        # --------------------
+        # Stage 1: Retriever
+        # --------------------
+        n_stage1 += 1
+
         ret_key = (q, top_k)
         if ret_key not in retrieve_cache:
             retrieve_cache[ret_key] = retriever.retrieve(q, top_k=top_k)
@@ -175,24 +190,38 @@ def evaluate_one_setting(
 
         _, A_i = retriever_fail(retrieved, gold_doc_ids, tau_1)
         A_list.append(A_i)
+
         if A_i == 1:
             fail_cases["retriever"].append(qid)
             continue
 
+        # --------------------
+        # Stage 2: Reranker
+        # --------------------
+        n_stage2 += 1
+
         rerank_key = (q, top_k, top_K)
         if rerank_key not in rerank_cache:
-            rerank_cache[rerank_key] = reranker.rerank(q, retrieved, top_K=top_K)
+            # 注意：這裡請確認 reranker.rerank 的參數名是不是 top_k
+            rerank_cache[rerank_key] = reranker.rerank(q, retrieved, top_k=top_K)
         reranked = rerank_cache[rerank_key]
 
         _, B_i = reranker_fail(reranked, gold_doc_ids, tau_2)
         B_list.append(B_i)
+
         if B_i == 1:
             fail_cases["reranker"].append(qid)
             continue
 
+        # --------------------
+        # Stage 3: Generator
+        # --------------------
+        n_stage3 += 1
+
         contexts = reranked[:N_rag]
         doc_ids = tuple(d.metadata["doc_id"] for d in contexts)
         gen_key = (q, doc_ids, lambda_g, lambda_s)
+
         if gen_key not in gen_cache:
             gen_cache[gen_key] = generator.generate_answers(
                 q, contexts, lambda_g=lambda_g, lambda_s=lambda_s
@@ -201,9 +230,11 @@ def evaluate_one_setting(
 
         _, C_i = generator_fail(generation_set, gold_answer, tau_3=tau_3)
         C_list.append(C_i)
+
         if C_i == 1:
             fail_cases["generator"].append(qid)
 
+    # 條件風險估計
     fwer_1 = sum(A_list) / max(len(A_list), 1)
     fwer_2 = sum(B_list) / max(len(B_list), 1)
     fwer_3 = sum(C_list) / max(len(C_list), 1)
@@ -221,6 +252,9 @@ def evaluate_one_setting(
         "FWER_3": fwer_3,
         "P(E)_hat": pe_hat,
         "fail_cases": fail_cases,
+        "n_stage1": n_stage1,
+        "n_stage2": n_stage2,
+        "n_stage3": n_stage3,
     }
 
 def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg):
@@ -388,15 +422,18 @@ def evaluate_stage12(
     for row in calib_data:
         qid = row["qid"]
         q = row["question"]
-        gold_doc_id = row["gold_doc_id"]
         gold_answer = row["gold_answer"]
+
+        gold_doc_ids = row.get("gold_doc_ids")
+        if gold_doc_ids is None:
+            gold_doc_ids = [row["gold_doc_id"]]
 
         ret_key = (q, top_k)
         if ret_key not in retrieve_cache:
             retrieve_cache[ret_key] = retriever.retrieve(q, top_k=top_k)
         retrieved = retrieve_cache[ret_key]
 
-        _, A_i = retriever_fail(retrieved, gold_doc_id, tau_1)
+        _, A_i = retriever_fail(retrieved, gold_doc_ids, tau_1)
         A_list.append(A_i)
         if A_i == 1:
             continue
@@ -406,7 +443,7 @@ def evaluate_stage12(
             rerank_cache[rerank_key] = reranker.rerank(q, retrieved, top_K=top_K)
         reranked = rerank_cache[rerank_key]
 
-        _, B_i = reranker_fail(reranked, gold_doc_id, tau_2)
+        _, B_i = reranker_fail(reranked, gold_doc_ids, tau_2)
         B_list.append(B_i)
         if B_i == 1:
             continue

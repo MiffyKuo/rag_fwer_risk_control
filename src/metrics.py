@@ -1,4 +1,6 @@
 from rouge_score import rouge_scorer
+import math
+import re
 
 scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
 
@@ -12,30 +14,38 @@ scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
 # 漏太多就失敗
 def retriever_fail(retrieved_docs, gold_doc_ids, tau_1=0.0):
     """
-    loss_1 = 1 - (# retrieved relevant docs / # all relevant docs)
+    Multi-gold version.
+    loss_1 = 1 - (retrieved relevant docs / total relevant docs)
     """
     retrieved_ids = {d.metadata["doc_id"] for d in retrieved_docs}
     gold_set = set(gold_doc_ids)
 
     if len(gold_set) == 0:
-        return 1.0, 1
+        loss_1 = 1.0
+    else:
+        covered = len(retrieved_ids & gold_set)
+        loss_1 = 1.0 - covered / len(gold_set)
 
-    covered = len(retrieved_ids & gold_set)
-    loss_1 = 1.0 - covered / len(gold_set)
     A_i = int(loss_1 > tau_1)
     return loss_1, A_i
 
 # 分數太低就失敗(代表relevent沒排在前面)
 def reranker_fail(reranked_docs, gold_doc_ids, tau_2=0.0):
     """
-    簡化版 nDCGmod：
-    relevant docs 越排前面越好
+    Multi-gold simplified nDCG-style loss.
+
+    想法：
+    - relevant docs 出現在越前面越好
+    - 用 DCG / IDCG 算簡化版 nDCG
+    - loss_2 = 1 - nDCG
     """
     doc_ids = [d.metadata["doc_id"] for d in reranked_docs]
     gold_set = set(gold_doc_ids)
 
     if len(gold_set) == 0:
-        return 1.0, 1
+        loss_2 = 1.0
+        B_i = int(loss_2 > tau_2)
+        return loss_2, B_i
 
     dcg = 0.0
     for rank, doc_id in enumerate(doc_ids, start=1):
@@ -43,7 +53,9 @@ def reranker_fail(reranked_docs, gold_doc_ids, tau_2=0.0):
             dcg += 1.0 / math.log2(rank + 1.0)
 
     ideal_hits = min(len(gold_set), len(doc_ids))
-    idcg = sum(1.0 / math.log2(rank + 1.0) for rank in range(1, ideal_hits + 1))
+    idcg = 0.0
+    for rank in range(1, ideal_hits + 1):
+        idcg += 1.0 / math.log2(rank + 1.0)
 
     if idcg == 0:
         loss_2 = 1.0
@@ -56,8 +68,6 @@ def reranker_fail(reranked_docs, gold_doc_ids, tau_2=0.0):
 
 # 答案跟標準答案差太多就失敗
 
-# 標準答案有沒有被回答出來
-import re
 
 def normalize_text(s: str) -> str:
     s = s.lower().strip()
