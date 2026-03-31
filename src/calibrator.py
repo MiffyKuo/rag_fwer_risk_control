@@ -137,9 +137,9 @@ def build_threshold_candidates(calib_data, retriever, reranker, search_cfg):
     }
 
 def time_proxy(top_k, top_K, N_rag, lambda_g, avg_doc_tokens=180, L_query=30, L_out=64):
-    # 依照你 PPT 的時間近似概念，給 reranker 和 generator 較高權重
+    # 依照時間近似概念，給 reranker 和 generator 較高權重
     retrieval_cost = 1.0 * top_k
-    rerank_cost = 4.0 * top_K
+    rerank_cost = 4.0 * top_k + 0.5 * top_K
     gen_cost = lambda_g * (0.03 * (L_query + N_rag * avg_doc_tokens) + 1.0 * L_out)
     return retrieval_cost + rerank_cost + gen_cost
 
@@ -209,6 +209,8 @@ def evaluate_one_setting(
     fwer_2 = sum(B_list) / max(len(B_list), 1)
     fwer_3 = sum(C_list) / max(len(C_list), 1)
 
+    pe_hat = allocation_total(fwer_1, fwer_2, fwer_3)
+
     return {
         "top_k": top_k,
         "top_K": top_K,
@@ -218,6 +220,7 @@ def evaluate_one_setting(
         "FWER_1": fwer_1,
         "FWER_2": fwer_2,
         "FWER_3": fwer_3,
+        "P(E)_hat": pe_hat,
         "fail_cases": fail_cases,
     }
 
@@ -264,7 +267,16 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
     # -------------------------
     for top_k in top_k_candidates:
         for top_K in top_K_candidates_map[top_k]:
+            MIN_TOP_K = 3 # reranker 至少保留 3 篇
+            MIN_N_RAG = 3 # generator 至少吃 3 篇
+
             if top_K > top_k:
+                continue
+            if N_rag > top_K:
+                continue
+            if top_K < MIN_TOP_K:
+                continue
+            if N_rag < MIN_N_RAG:
                 continue
 
             s12 = evaluate_stage12(
@@ -360,7 +372,14 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
         raw_results.sort(key=lambda x: (x["P(E)_hat"], x["time_proxy"]))
         return None, raw_results, []
 
-    feasible_results.sort(key=lambda x: (x["time_proxy"], x["P(E)_hat"]))
+    feasible_results.sort(
+        key=lambda x: (
+            time_proxy(x["top_k"], x["top_K"], x["N_rag"], x["lambda_g"]),
+            -x["top_K"],        # 同樣成本時，優先保留更多篇
+            -x["N_rag"],        # 同樣成本時，優先更多上下文
+            x["P(E)_budget"],
+        )
+    )
     best = feasible_results[0]
     return best, raw_results, feasible_results
 

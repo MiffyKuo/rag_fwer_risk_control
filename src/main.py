@@ -3,7 +3,7 @@ from data_utils import load_jsonl
 from retriever_module import RetrieverModule
 from reranker_module import SimpleReranker
 from generator_module import GeneratorModule
-from calibrator import grid_search
+from calibrator import grid_search, end_to_end_fwer
 from pipeline import RiskControlledRAG
 
 
@@ -55,10 +55,27 @@ def main():
     # 6.1 後續印結果(沒成功的話)
     if best_params is None:
         print("找不到滿足整體 FWER 門檻的參數組合。")
-        ranked = sorted(
-            all_results,
-            key=lambda x: (x["FWER_3"], x["FWER_2"], x["FWER_1"], -x["top_k"], -x["lambda_g"])
+
+        ranked = []
+        for r in all_results:
+            pe_hat = end_to_end_fwer(r["FWER_1"], r["FWER_2"], r["FWER_3"])
+            gap = pe_hat - risk_cfg.alpha_total
+            ranked.append({
+                **r,
+                "P(E)_hat": round(pe_hat, 4),
+                "gap_to_alpha_total": round(gap, 4),
+            })
+
+        ranked.sort(
+            key=lambda x: (
+                x["gap_to_alpha_total"],   # 越接近 alpha_total 越前面
+                x["P(E)_hat"],
+                -x["top_K"],               # 同樣接近時，優先看保留較多文件
+                -x["N_rag"],
+                x["lambda_g"],
+            )
         )
+
         print("\n最接近可行的前 10 組：")
         for r in ranked[:10]:
             print(r)

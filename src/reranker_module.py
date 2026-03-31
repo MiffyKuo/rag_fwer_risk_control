@@ -8,6 +8,11 @@ class SimpleReranker:
         pairs = [(question, doc.page_content) for doc in docs]
         scores = self.model.predict(pairs)
 
-        scored = list(zip(scores, docs))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [doc for score, doc in scored[:top_K]]
+        scored_docs = []
+        for score, doc in zip(scores, docs):
+            new_doc = deepcopy(doc)
+            new_doc.metadata["rerank_score"] = float(score)
+            scored_docs.append(new_doc)
+
+        scored_docs.sort(key=lambda d: d.metadata["rerank_score"], reverse=True)
+        return scored_docs[:top_K]
