@@ -74,9 +74,9 @@ from pipeline import RiskControlledRAG
 
 def main():
     # 1. 載入資料
-    corpus_data = load_jsonl("data/corpus.jsonl")
+    corpus = load_jsonl("data/corpus.jsonl")
     calib_data = load_jsonl("data/calib.jsonl")
-    test_data = load_jsonl("data/test.jsonl")
+    test_rows = load_jsonl("data/test.jsonl")
 
     # 2. 建立 config
     risk_cfg = RiskConfig()
@@ -84,9 +84,11 @@ def main():
     model_cfg = ModelConfig()
 
     # 3. 建立模組
-    retriever = Retriever(corpus_data, model_cfg.embedding_model)
-    reranker = Reranker(model_cfg.reranker_model)
-    generator = Generator(
+    retriever = RetrieverModule(model_cfg.embedding_model)
+    retriever.build_index(corpus)
+
+    reranker = SimpleReranker(model_cfg.reranker_model)
+    generator = GeneratorModule(
         model_name=model_cfg.generator_model,
         api_base=model_cfg.generator_api_base,
         api_key=model_cfg.generator_api_key,
@@ -106,7 +108,7 @@ def main():
     # 5. 搜尋結束後，再一次性存 cache
     generator.save_cache()
 
-    # 6. 後續印結果
+    # 6.1 後續印結果(沒成功的話)
     if best_params is None:
         print("找不到滿足整體 FWER 門檻的參數組合。")
         ranked = sorted(
@@ -120,5 +122,12 @@ def main():
 
     print("最佳參數：", best_params)
 
+    # 6.2 後續印結果(成功的話)
+    rag = RiskControlledRAG(retriever, reranker, generator, best_params)
+    sample_q = test_rows[0]["question"]
+    result = rag.answer(sample_q)
+
+    print("Sample test question:", sample_q)
+    print(result)
 if __name__ == "__main__":
     main()
