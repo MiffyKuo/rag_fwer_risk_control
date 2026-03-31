@@ -119,3 +119,6 @@ def main():
         return
 
     print("最佳參數：", best_params)
+
+if __name__ == "__main__":
+    main()
