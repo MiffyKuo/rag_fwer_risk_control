@@ -1,4 +1,4 @@
-from config import RiskConfig, SearchGrid, ModelConfig
+from config import RiskConfig, SearchConfig, ModelConfig
 from data_utils import load_jsonl
 from retriever_module import RetrieverModule
 from reranker_module import SimpleReranker
@@ -24,7 +24,7 @@ def main():
         tau_2=0.0,
         tau_3=0.0,
     )
-    grid_cfg = SearchGrid()
+    grid_cfg = SearchConfig()
     model_cfg = ModelConfig()
 
     # 3. 建立模組
