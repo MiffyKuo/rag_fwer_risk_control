@@ -1,4 +1,5 @@
 from sentence_transformers import CrossEncoder
+from copy import deepcopy
 
 class SimpleReranker:
     def __init__(self, model_name: str):
