@@ -5,10 +5,13 @@ from pprint import pprint
 
 OUTPUT_DIR = Path("data")
 
-
-TRAIN_SLICE = "train[:200]"
-VALID_SLICE = "validation[:100]"
-MAX_CONTEXT_CHARS = 1500
+TRAIN_SLICE = os.getenv("TRAIN_SLICE", "train[:40]")
+VALID_SLICE = os.getenv("VALID_SLICE", "validation[:20]")
+MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "1000"))
+# 正式版再用以下 :
+# TRAIN_SLICE = "train[:200]"
+# VALID_SLICE = "validation[:100]"
+# MAX_CONTEXT_CHARS = 1500
 
 
 def save_jsonl(rows, path: Path):

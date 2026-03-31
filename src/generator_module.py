@@ -112,5 +112,7 @@ Answer:
             answers = ["I do not know."]
 
         self.cache[key] = answers
-        self._save_cache()
         return answers
+    
+    def save_cache(self):
+        self._save_cache()
