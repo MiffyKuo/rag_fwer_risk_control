@@ -24,7 +24,7 @@ def main():
         tau_2=0.0,
         tau_3=0.0,
     )
-    grid_cfg = SearchConfig()
+    search_cfg = SearchConfig()
     model_cfg = ModelConfig()
 
     # 3. 建立模組
