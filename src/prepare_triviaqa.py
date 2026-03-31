@@ -136,31 +136,42 @@ def row_to_example(row, idx, prefix):
     question = extract_question(row)
     answer = extract_answer(row)
     qid = extract_qid(row, idx)
-    title, context = extract_context_and_title(row)
+    contexts = extract_all_contexts(row)
 
     if not question:
         return None, "missing_question"
     if not answer:
         return None, "missing_answer"
-    if not context:
+    if not contexts:
         return None, "missing_context"
 
-    doc_id = f"{prefix}_{qid}"
-    text = f"{title}. {context}" if title else context
+    corpus_rows = []
+    gold_doc_ids = []
 
-    corpus_row = {
-        "doc_id": doc_id,
-        "text": text
-    }
+    for j, item in enumerate(contexts):
+        source_tag = "ep" if item["source"] == "entity_pages" else "sr"
+        doc_id = f"{prefix}_{qid}_{source_tag}_{j}"
+
+        text = f"{item['title']}.\n{item['context']}" if item["title"] else item["context"]
+
+        corpus_rows.append({
+            "doc_id": doc_id,
+            "text": text,
+            "title": item["title"],
+            "source": item["source"],
+            "qid": f"{prefix}_{qid}",
+        })
+        gold_doc_ids.append(doc_id)
 
     qa_row = {
-        "qid": doc_id,
+        "qid": f"{prefix}_{qid}",
         "question": question,
         "gold_answer": answer,
-        "gold_doc_id": doc_id
+        "gold_doc_ids": gold_doc_ids,
+        "primary_gold_doc_id": gold_doc_ids[0],
     }
 
-    return (corpus_row, qa_row), None
+    return (corpus_rows, qa_row), None
 
 
 def build_rows(dataset, prefix):
