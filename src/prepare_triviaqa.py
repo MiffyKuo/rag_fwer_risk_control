@@ -6,9 +6,9 @@ from datasets import load_dataset
 from pprint import pprint
 
 OUTPUT_DIR = Path("data")
-TRAIN_SLICE = os.getenv("TRAIN_SLICE", "train[:10]") # 原本40
-VALID_SLICE = os.getenv("VALID_SLICE", "validation[:5]") # 原本20
-MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "500")) #原本1000
+TRAIN_SLICE = os.getenv("TRAIN_SLICE", "train[:40]") 
+VALID_SLICE = os.getenv("VALID_SLICE", "validation[:20]") 
+MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "1000")) 
 
 
 def save_jsonl(rows, path: Path):
