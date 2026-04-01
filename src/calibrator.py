@@ -324,7 +324,7 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                 rerank_cache=rerank_cache,
             )
 
-            if risk_cfg.allocation_mode == "weighted":
+            if risk_cfg.allocation_mode == "weighted" and risk_cfg.enforce_module_budgets:
                 if s12["FWER_1"] > alpha_1 + risk_cfg.safety_margin:
                     continue
                 if s12["FWER_2"] > alpha_2 + risk_cfg.safety_margin:

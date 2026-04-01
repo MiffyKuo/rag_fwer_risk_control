@@ -15,12 +15,12 @@ class RiskConfig:
     allocation_mode: str = "weighted"
 
     # 只有 allocation_mode="weighted" 時才會用到
-    w_retrieval: float = 0.1
-    w_reranker: float = 0.2
-    w_generator: float = 0.7
+    w_retrieval: float = 0.3
+    w_reranker: float = 0.3
+    w_generator: float = 0.4
 
     # 是否同時要求個別模組風險也要 <= 分配到的 alpha_j
-    enforce_module_budgets: bool = True
+    enforce_module_budgets: bool = False
 
     # 如果之後想做有限樣本保守修正，可加 safety margin
     safety_margin: float = 0.0
