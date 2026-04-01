@@ -132,6 +132,19 @@ def extract_all_contexts(row):
 
     return deduped
 
+
+def normalize_text_for_match(s):
+    s = s.lower().strip()
+    s = re.sub(r"[^a-z0-9\s]", " ", s)
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+def supports_answer(text, answer):
+    text_n = normalize_text_for_match(text)
+    ans_n = normalize_text_for_match(answer)
+    return ans_n in text_n
+
+
 def row_to_example(row, idx, prefix):
     question = extract_question(row)
     answer = extract_answer(row)
@@ -146,7 +159,6 @@ def row_to_example(row, idx, prefix):
         return None, "missing_context"
 
     corpus_rows = []
-    gold_doc_ids = []
 
     for j, item in enumerate(contexts):
         source_tag = "ep" if item["source"] == "entity_pages" else "sr"
@@ -161,7 +173,17 @@ def row_to_example(row, idx, prefix):
             "source": item["source"],
             "qid": f"{prefix}_{qid}",
         })
-        gold_doc_ids.append(doc_id)
+
+    # 只把真正包含答案的文件視為 gold
+    gold_doc_ids = [
+        row["doc_id"]
+        for row in corpus_rows
+        if supports_answer(row["text"], answer)
+    ]
+
+    # 如果完全找不到，就退一步只保留第一篇，避免空集合
+    if len(gold_doc_ids) == 0:
+        gold_doc_ids = [corpus_rows[0]["doc_id"]]
 
     qa_row = {
         "qid": f"{prefix}_{qid}",
