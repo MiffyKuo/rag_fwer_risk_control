@@ -124,7 +124,10 @@ def build_threshold_candidates(calib_data, retriever, reranker, search_cfg):
         top_K_candidates_map[top_k] = top_Ks
 
         for top_K in top_Ks:
-            N_rag_candidates_map[(top_k, top_K)] = auto_N_rag_candidates(top_K)
+            if search_cfg.fix_n_rag_to_top_K:
+                N_rag_candidates_map[(top_k, top_K)] = [top_K]
+            else:
+                N_rag_candidates_map[(top_k, top_K)] = auto_N_rag_candidates(top_K)
 
     lambda_g_candidates = auto_lambda_g_candidates(search_cfg)
     lambda_s_candidates = auto_lambda_s_candidates(search_cfg)
@@ -345,12 +348,18 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
     for s12 in stage12_candidates:
         top_k = s12["top_k"]
         top_K = s12["top_K"]
+        
         print(f"[stage3] top_k={top_k}, top_K={top_K}, passed_rows={len(s12['passed_rows'])}")
 
         for N_rag in N_rag_candidates_map[(top_k, top_K)]:
-            if N_rag < search_cfg.min_N_rag:
+            if (not search_cfg.fix_n_rag_to_top_K) and N_rag < search_cfg.min_N_rag:
                 continue
-            print(f"  N_rag={N_rag}")
+
+            if search_cfg.fix_n_rag_to_top_K:
+                print(f"  N_rag fixed to top_K = {N_rag}")
+            else:
+                print(f"  N_rag={N_rag}")
+
             for lambda_g in lambda_g_candidates:
                 for lambda_s in lambda_s_candidates:
                     print(f"    lambda_g={lambda_g}, lambda_s={lambda_s}")

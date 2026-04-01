@@ -35,7 +35,8 @@ class SearchConfig:
     top_K_mode: str = "auto_sparse"
     min_top_K: int = 3
 
-    max_lambda_g: int = 2
+    fix_n_rag_to_top_K: bool = True # N_rag是否要等於top-K
+    max_lambda_g: int = 1
     lambda_s_candidates: list = field(default_factory=lambda: [0.8])
     max_stage12_candidates: int = 10
     min_N_rag: int = 1

@@ -84,7 +84,13 @@ def main():
     print("最佳參數：", best_params)
 
     # 6.2 後續印結果(成功的話)
-    rag = RiskControlledRAG(retriever, reranker, generator, best_params)
+    rag = RiskControlledRAG(
+        retriever,
+        reranker,
+        generator,
+        best_params,
+        fix_n_rag_to_top_K=search_cfg.fix_n_rag_to_top_K
+    )
     sample_q = test_rows[0]["question"]
     result = rag.answer(sample_q)
 

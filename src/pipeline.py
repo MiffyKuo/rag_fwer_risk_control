@@ -1,21 +1,27 @@
 # 拿 calibration 選好的最佳參數，真的去回答新問題
 class RiskControlledRAG:
-    def __init__(self, retriever, reranker, generator, best_params):
+    def __init__(self, retriever, reranker, generator, best_params, fix_n_rag_to_top_K=False):
         self.retriever = retriever
         self.reranker = reranker
         self.generator = generator
         self.best_params = best_params
+        self.fix_n_rag_to_top_K = fix_n_rag_to_top_K
 
     def answer(self, question: str):
         top_k = self.best_params["top_k"]
         top_K = self.best_params["top_K"]
-        N_rag = self.best_params["N_rag"]
         lambda_g = self.best_params["lambda_g"]
         lambda_s = self.best_params["lambda_s"]
 
         retrieved = self.retriever.retrieve(question, top_k=top_k)
         reranked = self.reranker.rerank(question, retrieved, top_K=top_K)
-        contexts = reranked[:N_rag]
+
+        if self.fix_n_rag_to_top_K:
+            N_rag = top_K
+            contexts = reranked
+        else:
+            N_rag = self.best_params["N_rag"]
+            contexts = reranked[:N_rag]
 
         answers = self.generator.generate_answers(
             question,
