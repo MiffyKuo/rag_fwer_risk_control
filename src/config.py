@@ -12,7 +12,7 @@ class RiskConfig:
 
     # "direct" = 只檢查端到端 P(E) <= alpha_total
     # "weighted" = 先把 alpha_total 分配成 alpha_1, alpha_2, alpha_3
-    allocation_mode: str = "direct"
+    allocation_mode: str = "weighted"
 
     # 只有 allocation_mode="weighted" 時才會用到
     w_retrieval: float = 0.1
@@ -28,7 +28,7 @@ class RiskConfig:
 # 測試版searchconfig
 @dataclass
 class SearchConfig:
-    max_top_k: int = 80
+    max_top_k: int = 40
     min_top_k: int = 5
     add_top_k_buffer: tuple = (0, 2)
 

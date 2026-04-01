@@ -298,6 +298,7 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
     # -------------------------
     # 3. search stage 1 + 2
     # -------------------------
+    print("Start stage 1+2 search...")
     for top_k in top_k_candidates:
         for top_K in top_K_candidates_map[top_k]:
             MIN_TOP_K = 3 # reranker 至少保留 3 篇
@@ -339,13 +340,20 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
     # -------------------------
     # 4. search stage 3
     # -------------------------
+    print(f"stage12 candidates kept: {len(stage12_candidates)}")
+    print("Start stage 3 search...")
     for s12 in stage12_candidates:
         top_k = s12["top_k"]
         top_K = s12["top_K"]
+        print(f"[stage3] top_k={top_k}, top_K={top_K}, passed_rows={len(s12['passed_rows'])}")
 
         for N_rag in N_rag_candidates_map[(top_k, top_K)]:
+            if N_rag < search_cfg.min_N_rag:
+                continue
+            print(f"  N_rag={N_rag}")
             for lambda_g in lambda_g_candidates:
                 for lambda_s in lambda_s_candidates:
+                    print(f"    lambda_g={lambda_g}, lambda_s={lambda_s}")
                     s3 = evaluate_stage3(
                         passed_rows=s12["passed_rows"],
                         generator=generator,
