@@ -25,23 +25,38 @@ class RiskConfig:
     # 如果之後想做有限樣本保守修正，可加 safety margin
     safety_margin: float = 0.0
 
-
+# 測試版searchconfig
 @dataclass
 class SearchConfig:
-    # -------- stage 1: retriever --------
-    # 最大搜尋範圍
-    max_top_k: int = 500 
-    min_top_k: int = 10
-    add_top_k_buffer: tuple = (0, 2, 5)
+    max_top_k: int = 80
+    min_top_k: int = 5
+    add_top_k_buffer: tuple = (0, 2)
 
-    # -------- stage 2: reranker --------
-    top_K_mode: str = "auto_sparse"       # auto / full / coarse_to_fine(先粗搜，再細搜)
+    top_K_mode: str = "auto_sparse"
+    min_top_K: int = 3
 
-    # -------- stage 3: generator --------
-    max_lambda_g: int = 3
-    lambda_s_candidates: list = field(default_factory=lambda: [0.7, 0.8, 0.9])
-    # 可選：粗搜完後只保留前幾組 stage12
-    max_stage12_candidates: int = 30
+    max_lambda_g: int = 2
+    lambda_s_candidates: list = field(default_factory=lambda: [0.8])
+    max_stage12_candidates: int = 10
+    min_N_rag: int = 1
+
+# 正式版searchconfig
+# @dataclass
+# class SearchConfig:
+#     # -------- stage 1: retriever --------
+#     # 最大搜尋範圍
+#     max_top_k: int = 500 
+#     min_top_k: int = 10
+#     add_top_k_buffer: tuple = (0, 2, 5)
+
+#     # -------- stage 2: reranker --------
+#     top_K_mode: str = "auto_sparse"       # auto / full / coarse_to_fine(先粗搜，再細搜)
+
+#     # -------- stage 3: generator --------
+#     max_lambda_g: int = 3
+#     lambda_s_candidates: list = field(default_factory=lambda: [0.7, 0.8, 0.9])
+#     # 可選：粗搜完後只保留前幾組 stage12
+#     max_stage12_candidates: int = 30
 
 @dataclass
 class ModelConfig:

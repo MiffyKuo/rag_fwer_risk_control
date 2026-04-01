@@ -203,7 +203,7 @@ def evaluate_one_setting(
         rerank_key = (q, top_k, top_K)
         if rerank_key not in rerank_cache:
             # 注意：這裡請確認 reranker.rerank 的參數名是不是 top_k
-            rerank_cache[rerank_key] = reranker.rerank(q, retrieved, top_k=top_K)
+            rerank_cache[rerank_key] = reranker.rerank(q, retrieved, top_K=top_K)
         reranked = rerank_cache[rerank_key]
 
         _, B_i = reranker_fail(reranked, gold_doc_ids, tau_2)
@@ -383,12 +383,15 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                         result["alpha_2"] = alpha_2
                         result["alpha_3"] = alpha_3
 
-                        feasible = (
-                            fwer_1 <= alpha_1 + risk_cfg.safety_margin
-                            and fwer_2 <= alpha_2 + risk_cfg.safety_margin
-                            and fwer_3 <= alpha_3 + risk_cfg.safety_margin
-                            and pe_hat <= risk_cfg.alpha_total + risk_cfg.safety_margin
-                        )
+                        if risk_cfg.enforce_module_budgets:
+                            feasible = (
+                                fwer_1 <= alpha_1 + risk_cfg.safety_margin
+                                and fwer_2 <= alpha_2 + risk_cfg.safety_margin
+                                and fwer_3 <= alpha_3 + risk_cfg.safety_margin
+                                and pe_hat <= risk_cfg.alpha_total + risk_cfg.safety_margin
+                            )
+                        else:
+                            feasible = pe_hat <= risk_cfg.alpha_total + risk_cfg.safety_margin
                     else:
                         feasible = pe_hat <= risk_cfg.alpha_total + risk_cfg.safety_margin
 
@@ -403,10 +406,10 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
 
     feasible_results.sort(
         key=lambda x: (
-            time_proxy(x["top_k"], x["top_K"], x["N_rag"], x["lambda_g"]),
-            -x["top_K"],        # 同樣成本時，優先保留更多篇
-            -x["N_rag"],        # 同樣成本時，優先更多上下文
-            x["P(E)_budget"],
+            x["time_proxy"],
+            -x["top_K"],
+            -x["N_rag"],
+            x["P(E)_hat"],
         )
     )
     best = feasible_results[0]

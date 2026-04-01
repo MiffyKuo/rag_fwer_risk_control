@@ -1,13 +1,16 @@
+import torch
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 
-
 class RetrieverModule:
-    def __init__(self, embedding_model: str):
+    def __init__(self, embedding_model: str, device: str = None):
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
         self.embeddings = HuggingFaceEmbeddings(
             model_name=embedding_model,
-            model_kwargs={"device": "cuda"}, # server 有 GPU : "cpu" -> "cuda"
+            model_kwargs={"device": device},
             encode_kwargs={"normalize_embeddings": True}
         )
         self.vectorstore = None
