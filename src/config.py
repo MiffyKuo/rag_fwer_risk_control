@@ -20,10 +20,34 @@ class RiskConfig:
     w_generator: float = 0.4
 
     # 是否同時要求個別模組風險也要 <= 分配到的 alpha_j
-    enforce_module_budgets: bool = False
+    enforce_module_budgets: bool = True
 
     # 如果之後想做有限樣本保守修正，可加 safety margin
     safety_margin: float = 0.0
+
+    # ---------- finite-sample / split settings ----------
+    # 是否將 calibration data 切成 stage12 與 stage3 兩部分
+    use_data_split: bool = True
+
+    # stage12 佔整個 calibration 的比例
+    stage12_ratio: float = 0.5
+
+    # 若 True，對 retriever/reranker 使用 tCRC-s 風格 split
+    # I1: 選 retriever；I2: 選 reranker
+    use_stage12_tcrcs: bool = True
+    stage12_i1_ratio: float = 0.5
+
+    # stage3 是否使用 certified upper bound
+    use_stage3_certified_bound: bool = True
+
+    # C-RAG / finite-sample 的 confidence budget
+    delta_total: float = 0.10
+    delta_1: float = 0.03
+    delta_2: float = 0.03
+    delta_3: float = 0.04
+
+    random_seed: int = 42
+
 
 @dataclass
 class SearchConfig:

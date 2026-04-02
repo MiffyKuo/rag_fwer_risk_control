@@ -3,7 +3,7 @@ from data_utils import load_jsonl
 from retriever_module import RetrieverModule
 from reranker_module import SimpleReranker
 from generator_module import GeneratorModule
-from calibrator import grid_search, end_to_end_fwer
+from calibrator import grid_search, end_to_end_fwer, evaluate_fixed_params_on_dataset
 from pipeline import RiskControlledRAG
 
 
@@ -23,6 +23,21 @@ def main():
         tau_1=0.2,
         tau_2=0.4,
         tau_3=0.4,
+
+        # 建議開啟
+        enforce_module_budgets=True,
+        use_data_split=True,
+        stage12_ratio=0.5,
+        use_stage12_tcrcs=True,
+        stage12_i1_ratio=0.5,
+        use_stage3_certified_bound=True,
+
+        # 可自行調整
+        delta_total=0.10,
+        delta_1=0.03,
+        delta_2=0.03,
+        delta_3=0.04,
+        random_seed=42,
     )
     search_cfg = SearchConfig()
     model_cfg = ModelConfig()
@@ -59,17 +74,18 @@ def main():
         ranked = []
         for r in all_results:
             pe_hat = end_to_end_fwer(r["FWER_1"], r["FWER_2"], r["FWER_3"])
-            gap = pe_hat - risk_cfg.alpha_total
+            gap = r.get("P(E)_cert", pe_hat) - risk_cfg.alpha_total
             ranked.append({
                 **r,
                 "P(E)_hat": round(pe_hat, 4),
+                "P(E)_cert": round(r.get("P(E)_cert", pe_hat), 4),
                 "gap_to_alpha_total": round(gap, 4),
             })
 
         ranked.sort(
             key=lambda x: (
                 x["gap_to_alpha_total"],   # 越接近 alpha_total 越前面
-                x["P(E)_hat"],
+                x["P(E)_cert"],
                 -x["top_K"],               # 同樣接近時，優先看保留較多文件
                 -x["N_rag"],
                 x["lambda_g"],
@@ -83,7 +99,20 @@ def main():
 
     print("最佳參數：", best_params)
 
-    # 6.2 後續印結果(成功的話)
+    # 6.2 獨立 test set 檢查
+    test_summary = evaluate_fixed_params_on_dataset(
+        rows=test_rows,
+        retriever=retriever,
+        reranker=reranker,
+        generator=generator,
+        params=best_params,
+        tau_1=risk_cfg.tau_1,
+        tau_2=risk_cfg.tau_2,
+        tau_3=risk_cfg.tau_3,
+    )
+    print("Independent test summary:", test_summary)
+
+    # 6.3 後續印結果(成功的話)
     rag = RiskControlledRAG(
         retriever,
         reranker,
@@ -96,5 +125,7 @@ def main():
 
     print("Sample test question:", sample_q)
     print(result)
+
+
 if __name__ == "__main__":
     main()

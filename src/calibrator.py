@@ -1,9 +1,11 @@
-from itertools import product
+import math
+import random
 from metrics import retriever_fail, reranker_fail, generator_fail
-from collections import defaultdict
+
 
 def allocation_total(alpha_1, alpha_2, alpha_3):
     return alpha_1 + (1 - alpha_1) * alpha_2 + (1 - alpha_1) * (1 - alpha_2) * alpha_3
+
 
 def end_to_end_fwer(fwer_1, fwer_2, fwer_3):
     return (
@@ -12,12 +14,14 @@ def end_to_end_fwer(fwer_1, fwer_2, fwer_3):
         + (1 - fwer_1) * (1 - fwer_2) * fwer_3
     )
 
+
 def allocate_budgets(alpha_total, w1, w2, w3):
     s = 1.0 - alpha_total
     alpha_1 = 1.0 - s ** w1
     alpha_2 = 1.0 - s ** w2
     alpha_3 = 1.0 - s ** w3
     return alpha_1, alpha_2, alpha_3
+
 
 def solve_alpha_3(alpha_total, alpha_1, alpha_2):
     denom = (1 - alpha_1) * (1 - alpha_2)
@@ -27,6 +31,61 @@ def solve_alpha_3(alpha_total, alpha_1, alpha_2):
     if 0 <= alpha_3 <= 1:
         return alpha_3
     return None
+
+
+def split_rows(rows, ratio, seed=42):
+    rows = list(rows)
+    rng = random.Random(seed)
+    rng.shuffle(rows)
+    cut = int(len(rows) * ratio)
+    return rows[:cut], rows[cut:]
+
+
+def finite_sample_pass(num_fail, n, alpha):
+    if n <= 0:
+        return False
+    rhs = (n + 1) * alpha - 1
+    return num_fail <= rhs
+
+
+def _binom_cdf(k, n, p):
+    if k < 0:
+        return 0.0
+    if k >= n:
+        return 1.0
+    s = 0.0
+    for i in range(k + 1):
+        s += math.comb(n, i) * (p ** i) * ((1 - p) ** (n - i))
+    return min(max(s, 0.0), 1.0)
+
+
+def hb_upper_bound(r_hat, n, delta):
+    """
+    簡化版 Hoeffding-Bentkus / binomial inversion upper bound
+    不需要 scipy，直接用二分搜尋。
+    """
+    if n <= 0:
+        return 1.0
+
+    r_hat = min(max(r_hat, 0.0), 1.0)
+    delta = min(max(delta, 1e-12), 1.0 - 1e-12)
+
+    k = math.ceil(n * r_hat)
+    target = delta / math.e
+
+    lo = r_hat
+    hi = 1.0
+
+    for _ in range(60):
+        mid = (lo + hi) / 2.0
+        cdf = _binom_cdf(k, n, mid)
+        if cdf <= target:
+            hi = mid
+        else:
+            lo = mid
+
+    return hi
+
 
 # top-k 自動產生函數
 def auto_top_k_candidates(calib_data, retriever, search_cfg):
@@ -71,6 +130,7 @@ def auto_top_k_candidates(calib_data, retriever, search_cfg):
 
     top_k_candidates = sorted(ranks)
     return top_k_candidates
+
 
 # top-K 自動產生函數
 def auto_top_K_candidates(top_k, mode="auto_sparse"):
@@ -140,12 +200,14 @@ def build_threshold_candidates(calib_data, retriever, reranker, search_cfg):
         "lambda_s_candidates": lambda_s_candidates,
     }
 
+
 def time_proxy(top_k, top_K, N_rag, lambda_g, avg_doc_tokens=180, L_query=30, L_out=64):
     # 依照時間近似概念，給 reranker 和 generator 較高權重
     retrieval_cost = 1.0 * top_k
     rerank_cost = 4.0 * top_k + 0.5 * top_K
     gen_cost = lambda_g * (0.03 * (L_query + N_rag * avg_doc_tokens) + 1.0 * L_out)
     return retrieval_cost + rerank_cost + gen_cost
+
 
 def evaluate_one_setting(
     calib_data,
@@ -205,7 +267,6 @@ def evaluate_one_setting(
 
         rerank_key = (q, top_k, top_K)
         if rerank_key not in rerank_cache:
-            # 注意：這裡請確認 reranker.rerank 的參數名是不是 top_k
             rerank_cache[rerank_key] = reranker.rerank(q, retrieved, top_K=top_K)
         reranked = rerank_cache[rerank_key]
 
@@ -260,177 +321,6 @@ def evaluate_one_setting(
         "n_stage3": n_stage3,
     }
 
-def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg):
-    # -------------------------
-    # 1. alpha allocation
-    # -------------------------
-    if risk_cfg.allocation_mode == "weighted":
-        alpha_1, alpha_2, alpha_3 = allocate_budgets(
-            risk_cfg.alpha_total,
-            risk_cfg.w_retrieval,
-            risk_cfg.w_reranker,
-            risk_cfg.w_generator
-        )
-    else:
-        alpha_1 = alpha_2 = alpha_3 = None
-
-    # -------------------------
-    # 2. auto threshold candidates
-    # -------------------------
-    cand = build_threshold_candidates(
-        calib_data=calib_data,
-        retriever=retriever,
-        reranker=reranker,
-        search_cfg=search_cfg,
-    )
-
-    top_k_candidates = cand["top_k_candidates"]
-    top_K_candidates_map = cand["top_K_candidates_map"]
-    N_rag_candidates_map = cand["N_rag_candidates_map"]
-    lambda_g_candidates = cand["lambda_g_candidates"]
-    lambda_s_candidates = cand["lambda_s_candidates"]
-
-    retrieve_cache = {}
-    rerank_cache = {}
-    gen_cache = {}
-
-    raw_results = []
-    feasible_results = []
-    stage12_candidates = []
-
-    # -------------------------
-    # 3. search stage 1 + 2
-    # -------------------------
-    print("Start stage 1+2 search...")
-    for top_k in top_k_candidates:
-        for top_K in top_K_candidates_map[top_k]:
-            MIN_TOP_K = 3 # reranker 至少保留 3 篇
-            MIN_N_RAG = 3 # generator 至少吃 3 篇
-
-            if top_K > top_k:
-                continue
-            if top_K < MIN_TOP_K:
-                continue
-            
-            s12 = evaluate_stage12(
-                calib_data=calib_data,
-                retriever=retriever,
-                reranker=reranker,
-                top_k=top_k,
-                top_K=top_K,
-                tau_1=risk_cfg.tau_1,
-                tau_2=risk_cfg.tau_2,
-                retrieve_cache=retrieve_cache,
-                rerank_cache=rerank_cache,
-            )
-
-            if risk_cfg.allocation_mode == "weighted" and risk_cfg.enforce_module_budgets:
-                if s12["FWER_1"] > alpha_1 + risk_cfg.safety_margin:
-                    continue
-                if s12["FWER_2"] > alpha_2 + risk_cfg.safety_margin:
-                    continue
-
-            stage12_candidates.append(s12)
-
-    # prune
-    stage12_candidates.sort(
-        key=lambda x: (x["FWER_1"] + x["FWER_2"], x["top_k"], x["top_K"])
-    )
-    stage12_candidates = stage12_candidates[:search_cfg.max_stage12_candidates]
-
-    print(f"stage12 candidates kept: {len(stage12_candidates)}")
-
-    # -------------------------
-    # 4. search stage 3
-    # -------------------------
-    print(f"stage12 candidates kept: {len(stage12_candidates)}")
-    print("Start stage 3 search...")
-    for s12 in stage12_candidates:
-        top_k = s12["top_k"]
-        top_K = s12["top_K"]
-        
-        print(f"[stage3] top_k={top_k}, top_K={top_K}, passed_rows={len(s12['passed_rows'])}")
-
-        for N_rag in N_rag_candidates_map[(top_k, top_K)]:
-            if (not search_cfg.fix_n_rag_to_top_K) and N_rag < search_cfg.min_N_rag:
-                continue
-
-            if search_cfg.fix_n_rag_to_top_K:
-                print(f"  N_rag fixed to top_K = {N_rag}")
-            else:
-                print(f"  N_rag={N_rag}")
-
-            for lambda_g in lambda_g_candidates:
-                for lambda_s in lambda_s_candidates:
-                    print(f"    lambda_g={lambda_g}, lambda_s={lambda_s}")
-                    s3 = evaluate_stage3(
-                        passed_rows=s12["passed_rows"],
-                        generator=generator,
-                        top_k=top_k,
-                        top_K=top_K,
-                        N_rag=N_rag,
-                        lambda_g=lambda_g,
-                        lambda_s=lambda_s,
-                        tau_3=risk_cfg.tau_3,
-                        gen_cache=gen_cache,
-                    )
-
-                    fwer_1 = s12["FWER_1"]
-                    fwer_2 = s12["FWER_2"]
-                    fwer_3 = s3["FWER_3"]
-
-                    pe_hat = end_to_end_fwer(fwer_1, fwer_2, fwer_3)
-                    total_time = time_proxy(top_k, top_K, N_rag, lambda_g)
-
-                    result = {
-                        "top_k": top_k,
-                        "top_K": top_K,
-                        "N_rag": N_rag,
-                        "lambda_g": lambda_g,
-                        "lambda_s": lambda_s,
-                        "FWER_1": fwer_1,
-                        "FWER_2": fwer_2,
-                        "FWER_3": fwer_3,
-                        "P(E)_hat": pe_hat,
-                        "time_proxy": total_time,
-                    }
-
-                    if risk_cfg.allocation_mode == "weighted":
-                        result["alpha_1"] = alpha_1
-                        result["alpha_2"] = alpha_2
-                        result["alpha_3"] = alpha_3
-
-                        if risk_cfg.enforce_module_budgets:
-                            feasible = (
-                                fwer_1 <= alpha_1 + risk_cfg.safety_margin
-                                and fwer_2 <= alpha_2 + risk_cfg.safety_margin
-                                and fwer_3 <= alpha_3 + risk_cfg.safety_margin
-                                and pe_hat <= risk_cfg.alpha_total + risk_cfg.safety_margin
-                            )
-                        else:
-                            feasible = pe_hat <= risk_cfg.alpha_total + risk_cfg.safety_margin
-                    else:
-                        feasible = pe_hat <= risk_cfg.alpha_total + risk_cfg.safety_margin
-
-                    raw_results.append(result)
-
-                    if feasible:
-                        feasible_results.append(result)
-
-    if not feasible_results:
-        raw_results.sort(key=lambda x: (x["P(E)_hat"], x["time_proxy"]))
-        return None, raw_results, []
-
-    feasible_results.sort(
-        key=lambda x: (
-            x["time_proxy"],
-            -x["top_K"],
-            -x["N_rag"],
-            x["P(E)_hat"],
-        )
-    )
-    best = feasible_results[0]
-    return best, raw_results, feasible_results
 
 def evaluate_stage12(
     calib_data, retriever, reranker, top_k, top_K, tau_1, tau_2,
@@ -484,7 +374,12 @@ def evaluate_stage12(
         "FWER_1": fwer_1,
         "FWER_2": fwer_2,
         "passed_rows": passed_rows,
+        "num_fail_1": sum(A_list),
+        "num_fail_2": sum(B_list),
+        "n1": len(A_list),
+        "n2": len(B_list),
     }
+
 
 def evaluate_stage3(
     passed_rows, generator, top_k, top_K, N_rag, lambda_g, lambda_s, tau_3, gen_cache
@@ -518,4 +413,330 @@ def evaluate_stage3(
         "lambda_g": lambda_g,
         "lambda_s": lambda_s,
         "FWER_3": fwer_3,
+        "num_fail_3": sum(C_list),
+        "n3": len(C_list),
     }
+
+
+def evaluate_fixed_params_on_dataset(
+    rows,
+    retriever,
+    reranker,
+    generator,
+    params,
+    tau_1,
+    tau_2,
+    tau_3,
+):
+    retrieve_cache = {}
+    rerank_cache = {}
+    gen_cache = {}
+
+    return evaluate_one_setting(
+        calib_data=rows,
+        retriever=retriever,
+        reranker=reranker,
+        generator=generator,
+        top_k=params["top_k"],
+        top_K=params["top_K"],
+        N_rag=params["N_rag"],
+        lambda_g=params["lambda_g"],
+        lambda_s=params["lambda_s"],
+        tau_1=tau_1,
+        tau_2=tau_2,
+        tau_3=tau_3,
+        retrieve_cache=retrieve_cache,
+        rerank_cache=rerank_cache,
+        gen_cache=gen_cache
+    )
+
+
+def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg):
+    # -------------------------
+    # 1. alpha allocation
+    # -------------------------
+    if risk_cfg.allocation_mode == "weighted":
+        alpha_1, alpha_2, alpha_3 = allocate_budgets(
+            risk_cfg.alpha_total,
+            risk_cfg.w_retrieval,
+            risk_cfg.w_reranker,
+            risk_cfg.w_generator
+        )
+    else:
+        alpha_1 = alpha_2 = alpha_3 = None
+
+    # -------------------------
+    # 2. data split
+    # -------------------------
+    if risk_cfg.use_data_split:
+        calib_stage12, calib_stage3 = split_rows(
+            calib_data,
+            ratio=risk_cfg.stage12_ratio,
+            seed=risk_cfg.random_seed
+        )
+    else:
+        calib_stage12 = list(calib_data)
+        calib_stage3 = list(calib_data)
+
+    if risk_cfg.use_stage12_tcrcs:
+        calib_stage12_I1, calib_stage12_I2 = split_rows(
+            calib_stage12,
+            ratio=risk_cfg.stage12_i1_ratio,
+            seed=risk_cfg.random_seed + 1
+        )
+    else:
+        calib_stage12_I1 = list(calib_stage12)
+        calib_stage12_I2 = list(calib_stage12)
+
+    # -------------------------
+    # 3. auto threshold candidates
+    # -------------------------
+    cand = build_threshold_candidates(
+        calib_data=calib_stage12,
+        retriever=retriever,
+        reranker=reranker,
+        search_cfg=search_cfg,
+    )
+
+    top_k_candidates = cand["top_k_candidates"]
+    top_K_candidates_map = cand["top_K_candidates_map"]
+    N_rag_candidates_map = cand["N_rag_candidates_map"]
+    lambda_g_candidates = cand["lambda_g_candidates"]
+    lambda_s_candidates = cand["lambda_s_candidates"]
+
+    retrieve_cache = {}
+    rerank_cache = {}
+    gen_cache = {}
+
+    raw_results = []
+    feasible_results = []
+    stage12_candidates = []
+
+    # -------------------------
+    # 4. search stage 1 + 2
+    # -------------------------
+    print("Start stage 1+2 search...")
+    for top_k in top_k_candidates:
+        for top_K in top_K_candidates_map[top_k]:
+            MIN_TOP_K = search_cfg.min_top_K
+
+            if top_K > top_k:
+                continue
+            if top_K < MIN_TOP_K:
+                continue
+
+            # 4.1 stage1/2 search on split data (finite-sample style)
+            if risk_cfg.use_stage12_tcrcs:
+                s12_I1 = evaluate_stage12(
+                    calib_data=calib_stage12_I1,
+                    retriever=retriever,
+                    reranker=reranker,
+                    top_k=top_k,
+                    top_K=top_K,
+                    tau_1=risk_cfg.tau_1,
+                    tau_2=risk_cfg.tau_2,
+                    retrieve_cache=retrieve_cache,
+                    rerank_cache=rerank_cache,
+                )
+                s12_I2 = evaluate_stage12(
+                    calib_data=calib_stage12_I2,
+                    retriever=retriever,
+                    reranker=reranker,
+                    top_k=top_k,
+                    top_K=top_K,
+                    tau_1=risk_cfg.tau_1,
+                    tau_2=risk_cfg.tau_2,
+                    retrieve_cache=retrieve_cache,
+                    rerank_cache=rerank_cache,
+                )
+
+                # 再用 stage3 split 上的資料重新取得真正要送進 generator 的 passed_rows
+                s12_stage3 = evaluate_stage12(
+                    calib_data=calib_stage3,
+                    retriever=retriever,
+                    reranker=reranker,
+                    top_k=top_k,
+                    top_K=top_K,
+                    tau_1=risk_cfg.tau_1,
+                    tau_2=risk_cfg.tau_2,
+                    retrieve_cache=retrieve_cache,
+                    rerank_cache=rerank_cache,
+                )
+
+                if risk_cfg.allocation_mode == "weighted" and risk_cfg.enforce_module_budgets:
+                    if not finite_sample_pass(s12_I1["num_fail_1"], s12_I1["n1"], alpha_1):
+                        continue
+                    if not finite_sample_pass(s12_I2["num_fail_2"], s12_I2["n2"], alpha_2):
+                        continue
+
+                s12 = {
+                    "top_k": top_k,
+                    "top_K": top_K,
+                    "FWER_1": s12_stage3["FWER_1"],
+                    "FWER_2": s12_stage3["FWER_2"],
+                    "passed_rows": s12_stage3["passed_rows"],
+                    "FWER_1_I1": s12_I1["FWER_1"],
+                    "FWER_2_I2": s12_I2["FWER_2"],
+                    "num_fail_1_I1": s12_I1["num_fail_1"],
+                    "num_fail_2_I2": s12_I2["num_fail_2"],
+                    "n1_I1": s12_I1["n1"],
+                    "n2_I2": s12_I2["n2"],
+                }
+            else:
+                # 保留你原本的功能：不 split 時，照原本整份 calibration 搜索
+                s12 = evaluate_stage12(
+                    calib_data=calib_stage12,
+                    retriever=retriever,
+                    reranker=reranker,
+                    top_k=top_k,
+                    top_K=top_K,
+                    tau_1=risk_cfg.tau_1,
+                    tau_2=risk_cfg.tau_2,
+                    retrieve_cache=retrieve_cache,
+                    rerank_cache=rerank_cache,
+                )
+
+                if risk_cfg.allocation_mode == "weighted" and risk_cfg.enforce_module_budgets:
+                    if s12["FWER_1"] > alpha_1 + risk_cfg.safety_margin:
+                        continue
+                    if s12["FWER_2"] > alpha_2 + risk_cfg.safety_margin:
+                        continue
+
+            stage12_candidates.append(s12)
+
+    # prune
+    stage12_candidates.sort(
+        key=lambda x: (
+            x["FWER_1"] + x["FWER_2"],
+            x["top_k"],
+            x["top_K"]
+        )
+    )
+    stage12_candidates = stage12_candidates[:search_cfg.max_stage12_candidates]
+
+    print(f"stage12 candidates kept: {len(stage12_candidates)}")
+
+    # -------------------------
+    # 5. search stage 3
+    # -------------------------
+    print("Start stage 3 search...")
+    for s12 in stage12_candidates:
+        top_k = s12["top_k"]
+        top_K = s12["top_K"]
+
+        print(f"[stage3] top_k={top_k}, top_K={top_K}, passed_rows={len(s12['passed_rows'])}")
+
+        for N_rag in N_rag_candidates_map[(top_k, top_K)]:
+            if (not search_cfg.fix_n_rag_to_top_K) and N_rag < search_cfg.min_N_rag:
+                continue
+
+            if search_cfg.fix_n_rag_to_top_K:
+                print(f"  N_rag fixed to top_K = {N_rag}")
+            else:
+                print(f"  N_rag={N_rag}")
+
+            for lambda_g in lambda_g_candidates:
+                for lambda_s in lambda_s_candidates:
+                    print(f"    lambda_g={lambda_g}, lambda_s={lambda_s}")
+
+                    s3 = evaluate_stage3(
+                        passed_rows=s12["passed_rows"],
+                        generator=generator,
+                        top_k=top_k,
+                        top_K=top_K,
+                        N_rag=N_rag,
+                        lambda_g=lambda_g,
+                        lambda_s=lambda_s,
+                        tau_3=risk_cfg.tau_3,
+                        gen_cache=gen_cache,
+                    )
+
+                    fwer_1 = s12["FWER_1"]
+                    fwer_2 = s12["FWER_2"]
+                    fwer_3 = s3["FWER_3"]
+
+                    pe_hat = end_to_end_fwer(fwer_1, fwer_2, fwer_3)
+                    total_time = time_proxy(top_k, top_K, N_rag, lambda_g)
+
+                    result = {
+                        "top_k": top_k,
+                        "top_K": top_K,
+                        "N_rag": N_rag,
+                        "lambda_g": lambda_g,
+                        "lambda_s": lambda_s,
+                        "FWER_1": fwer_1,
+                        "FWER_2": fwer_2,
+                        "FWER_3": fwer_3,
+                        "P(E)_hat": pe_hat,
+                        "time_proxy": total_time,
+                    }
+
+                    if risk_cfg.allocation_mode == "weighted":
+                        result["alpha_1"] = alpha_1
+                        result["alpha_2"] = alpha_2
+                        result["alpha_3"] = alpha_3
+
+                    # 保留 split finite-sample 的診斷資訊
+                    if "FWER_1_I1" in s12:
+                        result["FWER_1_I1"] = s12["FWER_1_I1"]
+                        result["FWER_2_I2"] = s12["FWER_2_I2"]
+                        result["num_fail_1_I1"] = s12["num_fail_1_I1"]
+                        result["num_fail_2_I2"] = s12["num_fail_2_I2"]
+                        result["n1_I1"] = s12["n1_I1"]
+                        result["n2_I2"] = s12["n2_I2"]
+
+                    # certified generator bound
+                    if risk_cfg.use_stage3_certified_bound and risk_cfg.allocation_mode == "weighted":
+                        alpha_3_hat = hb_upper_bound(
+                            r_hat=fwer_3,
+                            n=s3["n3"],
+                            delta=risk_cfg.delta_3
+                        )
+                        result["alpha_3_hat"] = alpha_3_hat
+                        result["P(E)_cert"] = allocation_total(alpha_1, alpha_2, alpha_3_hat)
+
+                        if risk_cfg.enforce_module_budgets:
+                            feasible = (
+                                alpha_3_hat <= alpha_3 + risk_cfg.safety_margin
+                                and result["P(E)_cert"] <= risk_cfg.alpha_total + risk_cfg.safety_margin
+                            )
+                        else:
+                            feasible = result["P(E)_cert"] <= risk_cfg.alpha_total + risk_cfg.safety_margin
+                    else:
+                        if risk_cfg.allocation_mode == "weighted":
+                            if risk_cfg.enforce_module_budgets:
+                                feasible = (
+                                    fwer_1 <= alpha_1 + risk_cfg.safety_margin
+                                    and fwer_2 <= alpha_2 + risk_cfg.safety_margin
+                                    and fwer_3 <= alpha_3 + risk_cfg.safety_margin
+                                    and pe_hat <= risk_cfg.alpha_total + risk_cfg.safety_margin
+                                )
+                            else:
+                                feasible = pe_hat <= risk_cfg.alpha_total + risk_cfg.safety_margin
+                        else:
+                            feasible = pe_hat <= risk_cfg.alpha_total + risk_cfg.safety_margin
+
+                    raw_results.append(result)
+
+                    if feasible:
+                        feasible_results.append(result)
+
+    if not feasible_results:
+        raw_results.sort(
+            key=lambda x: (
+                x.get("P(E)_cert", x["P(E)_hat"]),
+                x["time_proxy"]
+            )
+        )
+        return None, raw_results, []
+
+    feasible_results.sort(
+        key=lambda x: (
+            x["time_proxy"],
+            -x["top_K"],
+            -x["N_rag"],
+            x.get("P(E)_cert", x["P(E)_hat"]),
+        )
+    )
+    best = feasible_results[0]
+    return best, raw_results, feasible_results
