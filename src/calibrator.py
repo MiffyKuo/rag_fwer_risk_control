@@ -517,7 +517,9 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
     # -------------------------
     print("Start stage 1+2 search...")
     for top_k in top_k_candidates:
+        print(f"[stage12] top_k={top_k}, candidates={top_K_candidates_map[top_k]}")
         for top_K in top_K_candidates_map[top_k]:
+            print(f"  evaluating top_k={top_k}, top_K={top_K}")
             MIN_TOP_K = search_cfg.min_top_K
 
             if top_K > top_k:
