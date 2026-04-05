@@ -8,7 +8,7 @@ from pprint import pprint
 OUTPUT_DIR = Path("data")
 TRAIN_SLICE = os.getenv("TRAIN_SLICE", "train[:120]") 
 VALID_SLICE = os.getenv("VALID_SLICE", "validation[:60]") 
-MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "500")) 
+MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "1000")) 
 
 
 def save_jsonl(rows, path: Path):
