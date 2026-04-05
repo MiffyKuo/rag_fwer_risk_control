@@ -15,7 +15,7 @@ def main():
 
     # 2. 建立 config
     risk_cfg = RiskConfig(
-        alpha_total=0.30,
+        alpha_total=0.50,
         allocation_mode="weighted",   # 或 "direct"
         w_retrieval=0.3,
         w_reranker=0.3,

@@ -3,7 +3,7 @@ import os
 
 @dataclass
 class RiskConfig:
-    alpha_total: float = 0.30
+    alpha_total: float = 0.50
 
     # module-level failure threshold
     tau_1: float = 0.0
@@ -53,9 +53,9 @@ class RiskConfig:
 class SearchConfig:
     # -------- stage 1: retriever --------
     # 最大搜尋範圍
-    max_top_k: int = 40 # 原 500
+    max_top_k: int = 8 # 原 500
     min_top_k: int = 5 # 原 10
-    add_top_k_buffer: tuple = (0, 2) # 原 (0, 2, 5)
+    add_top_k_buffer: tuple = (0, 1) # 原 (0, 2, 5)
 
     # -------- stage 2: reranker --------
     top_K_mode: str = "auto_sparse"
@@ -65,7 +65,7 @@ class SearchConfig:
     fix_n_rag_to_top_K: bool = True # N_rag是否要等於top-K
     max_lambda_g: int = 1 # 只生成1個答案
     lambda_s_candidates: list = field(default_factory=lambda: [0.8])
-    max_stage12_candidates: int = 5 # 原 10
+    max_stage12_candidates: int = 3 # 原 10
     min_N_rag: int = 1
 
 
