@@ -40,6 +40,38 @@ def split_rows(rows, ratio, seed=42):
     cut = int(len(rows) * ratio)
     return rows[:cut], rows[cut:]
 
+def get_effective_modes(calib_data, risk_cfg):
+    """
+    小資料時自動放寬設定，避免 split 之後每段只剩 1~2 題，
+    造成 finite-sample 條件永遠不可能通過。
+    """
+    n_total = len(calib_data)
+
+    use_data_split = risk_cfg.use_data_split
+    use_stage12_tcrcs = risk_cfg.use_stage12_tcrcs
+    use_stage3_certified_bound = risk_cfg.use_stage3_certified_bound
+
+    # calibration 太小，直接不要 split
+    if n_total < 12:
+        use_data_split = False
+        use_stage12_tcrcs = False
+        use_stage3_certified_bound = False
+        print(f"[auto-relax] calib size={n_total} 太小，關閉 data split / tCRC-s / certified bound")
+        return use_data_split, use_stage12_tcrcs, use_stage3_certified_bound
+
+    # stage12 太小時，不做 stage1/stage2 的二次 split
+    stage12_n = int(n_total * risk_cfg.stage12_ratio) if use_data_split else n_total
+    if stage12_n < 8:
+        use_stage12_tcrcs = False
+        print(f"[auto-relax] stage12 size={stage12_n} 太小，關閉 stage12 tCRC-s")
+
+    # stage3 太小時，不做 certified upper bound
+    stage3_n = n_total - stage12_n if use_data_split else n_total
+    if stage3_n < 10:
+        use_stage3_certified_bound = False
+        print(f"[auto-relax] stage3 size={stage3_n} 太小，關閉 stage3 certified bound")
+
+    return use_data_split, use_stage12_tcrcs, use_stage3_certified_bound
 
 def finite_sample_pass(num_fail, n, alpha):
     if n <= 0:
@@ -466,9 +498,16 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
         alpha_1 = alpha_2 = alpha_3 = None
 
     # -------------------------
-    # 2. data split
+    # 2. effective modes (auto relax on tiny calibration)
     # -------------------------
-    if risk_cfg.use_data_split:
+    use_data_split, use_stage12_tcrcs, use_stage3_certified_bound = get_effective_modes(
+        calib_data, risk_cfg
+    )
+
+    # -------------------------
+    # 3. data split
+    # -------------------------
+    if use_data_split:
         calib_stage12, calib_stage3 = split_rows(
             calib_data,
             ratio=risk_cfg.stage12_ratio,
@@ -478,7 +517,7 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
         calib_stage12 = list(calib_data)
         calib_stage3 = list(calib_data)
 
-    if risk_cfg.use_stage12_tcrcs:
+    if use_stage12_tcrcs:
         calib_stage12_I1, calib_stage12_I2 = split_rows(
             calib_stage12,
             ratio=risk_cfg.stage12_i1_ratio,

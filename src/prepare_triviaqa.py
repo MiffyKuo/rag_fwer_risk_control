@@ -6,8 +6,8 @@ from datasets import load_dataset
 from pprint import pprint
 
 OUTPUT_DIR = Path("data")
-TRAIN_SLICE = os.getenv("TRAIN_SLICE", "train[:40]") 
-VALID_SLICE = os.getenv("VALID_SLICE", "validation[:20]") 
+TRAIN_SLICE = os.getenv("TRAIN_SLICE", "train[:120]") 
+VALID_SLICE = os.getenv("VALID_SLICE", "validation[:60]") 
 MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "1000")) 
 
 
@@ -187,11 +187,12 @@ def row_to_example(row, idx, prefix):
         gold_doc_ids = [corpus_rows[0]["doc_id"]]
 
     qa_row = {
-        "qid": f"{prefix}_{qid}",
-        "question": question,
-        "gold_answer": answer,
-        "gold_doc_ids": gold_doc_ids,
-        "primary_gold_doc_id": gold_doc_ids[0],
+    "qid": f"{prefix}_{qid}",
+    "question": question,
+    "gold_answer": answer,
+    "gold_doc_ids": gold_doc_ids,
+    "gold_doc_id": gold_doc_ids[0],          # 向下相容
+    "primary_gold_doc_id": gold_doc_ids[0],  # 保留
     }
 
     return (corpus_rows, qa_row), None
