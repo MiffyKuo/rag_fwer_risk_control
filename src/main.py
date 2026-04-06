@@ -30,7 +30,7 @@ def main():
         stage12_ratio=0.5,
         use_stage12_tcrcs=True,
         stage12_i1_ratio=0.5,
-        use_stage3_certified_bound=True,
+        use_stage3_certified_bound=True, # True
 
         # 可自行調整
         delta_total=0.10,

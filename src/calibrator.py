@@ -567,7 +567,7 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                 continue
 
             # 4.1 stage1/2 search on split data (finite-sample style)
-            if risk_cfg.use_stage12_tcrcs:
+            if use_stage12_tcrcs:
                 s12_I1 = evaluate_stage12(
                     calib_data=calib_stage12_I1,
                     retriever=retriever,
@@ -727,7 +727,7 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                         result["n2_I2"] = s12["n2_I2"]
 
                     # certified generator bound
-                    if risk_cfg.use_stage3_certified_bound and risk_cfg.allocation_mode == "weighted":
+                    if use_stage3_certified_bound and risk_cfg.allocation_mode == "weighted":
                         alpha_3_hat = hb_upper_bound(
                             r_hat=fwer_3,
                             n=s3["n3"],

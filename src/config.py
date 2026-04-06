@@ -62,7 +62,7 @@ class SearchConfig:
     min_top_K: int = 2 # 原 3
 
     # -------- stage 3: generator --------
-    fix_n_rag_to_top_K: bool = True # N_rag是否要等於top-K
+    fix_n_rag_to_top_K: bool = False # N_rag是否要等於top-K
     max_lambda_g: int = 1 # 只生成1個答案
     lambda_s_candidates: list = field(default_factory=lambda: [0.8])
     max_stage12_candidates: int = 3 # 原 10
