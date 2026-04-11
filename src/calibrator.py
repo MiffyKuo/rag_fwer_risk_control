@@ -240,6 +240,35 @@ def time_proxy(top_k, top_K, N_rag, lambda_g, avg_doc_tokens=180, L_query=30, L_
     gen_cost = lambda_g * (0.03 * (L_query + N_rag * avg_doc_tokens) + 1.0 * L_out)
     return retrieval_cost + rerank_cost + gen_cost
 
+def _get_retrieved_docs(retrieve_cache, retriever, question, top_k, max_top_k_for_cache=None):
+    """
+    只對每個 question 做一次 retrieval cache。
+    cache 中存該 question 在 max_top_k_for_cache 下的完整結果，再依需求切片。
+    """
+    if max_top_k_for_cache is None:
+        max_top_k_for_cache = top_k
+
+    ret_key = (question, max_top_k_for_cache)
+
+    if ret_key not in retrieve_cache:
+        retrieve_cache[ret_key] = retriever.retrieve(question, top_k=max_top_k_for_cache)
+
+    return retrieve_cache[ret_key][:top_k]
+
+
+def _get_reranked_docs(rerank_cache, reranker, question, retrieved_docs, top_k, top_K):
+    """
+    只對每個 (question, top_k) 做一次 rerank。
+    cache 中存完整 reranked list，不要對每個 top_K 都各存一份。
+    """
+    rerank_key = (question, top_k)
+
+    if rerank_key not in rerank_cache:
+        full_reranked = reranker.rerank(question, retrieved_docs, top_K=top_k)
+        rerank_cache[rerank_key] = full_reranked
+
+    return rerank_cache[rerank_key][:top_K]
+
 def _batch_fill_gen_cache(
     rows,
     generator,
@@ -329,10 +358,13 @@ def _collect_stage3_rows(
 
         # Stage 1
         n_stage1 += 1
-        ret_key = (q, top_k)
-        if ret_key not in retrieve_cache:
-            retrieve_cache[ret_key] = retriever.retrieve(q, top_k=top_k)
-        retrieved = retrieve_cache[ret_key]
+        retrieved = _get_retrieved_docs(
+            retrieve_cache=retrieve_cache,
+            retriever=retriever,
+            question=q,
+            top_k=top_k,
+            max_top_k_for_cache=top_k,
+        )
 
         _, A_i = retriever_fail(retrieved, gold_doc_ids, tau_1)
         A_list.append(A_i)
@@ -343,10 +375,14 @@ def _collect_stage3_rows(
 
         # Stage 2
         n_stage2 += 1
-        rerank_key = (q, top_k, top_K)
-        if rerank_key not in rerank_cache:
-            rerank_cache[rerank_key] = reranker.rerank(q, retrieved, top_K=top_K)
-        reranked = rerank_cache[rerank_key]
+        reranked = _get_reranked_docs(
+            rerank_cache=rerank_cache,
+            reranker=reranker,
+            question=q,
+            retrieved_docs=retrieved,
+            top_k=top_k,
+            top_K=top_K,
+        )
 
         _, B_i = reranker_fail(reranked, gold_doc_ids, tau_2)
         B_list.append(B_i)
@@ -474,20 +510,27 @@ def evaluate_stage12_stats_only(
         if gold_doc_ids is None:
             gold_doc_ids = [row["gold_doc_id"]]
 
-        ret_key = (q, top_k)
-        if ret_key not in retrieve_cache:
-            retrieve_cache[ret_key] = retriever.retrieve(q, top_k=top_k)
-        retrieved = retrieve_cache[ret_key]
+        retrieved = _get_retrieved_docs(
+            retrieve_cache=retrieve_cache,
+            retriever=retriever,
+            question=q,
+            top_k=top_k,
+            max_top_k_for_cache=top_k,
+        )
 
         _, A_i = retriever_fail(retrieved, gold_doc_ids, tau_1)
         A_list.append(A_i)
         if A_i == 1:
             continue
 
-        rerank_key = (q, top_k, top_K)
-        if rerank_key not in rerank_cache:
-            rerank_cache[rerank_key] = reranker.rerank(q, retrieved, top_K=top_K)
-        reranked = rerank_cache[rerank_key]
+        reranked = _get_reranked_docs(
+            rerank_cache=rerank_cache,
+            reranker=reranker,
+            question=q,
+            retrieved_docs=retrieved,
+            top_k=top_k,
+            top_K=top_K,
+        )
 
         _, B_i = reranker_fail(reranked, gold_doc_ids, tau_2)
         B_list.append(B_i)
@@ -523,20 +566,27 @@ def evaluate_stage12(
         if gold_doc_ids is None:
             gold_doc_ids = [row["gold_doc_id"]]
 
-        ret_key = (q, top_k)
-        if ret_key not in retrieve_cache:
-            retrieve_cache[ret_key] = retriever.retrieve(q, top_k=top_k)
-        retrieved = retrieve_cache[ret_key]
+        retrieved = _get_retrieved_docs(
+            retrieve_cache=retrieve_cache,
+            retriever=retriever,
+            question=q,
+            top_k=top_k,
+            max_top_k_for_cache=top_k,
+        )
 
         _, A_i = retriever_fail(retrieved, gold_doc_ids, tau_1)
         A_list.append(A_i)
         if A_i == 1:
             continue
 
-        rerank_key = (q, top_k, top_K)
-        if rerank_key not in rerank_cache:
-            rerank_cache[rerank_key] = reranker.rerank(q, retrieved, top_K=top_K)
-        reranked = rerank_cache[rerank_key]
+        reranked = _get_reranked_docs(
+            rerank_cache=rerank_cache,
+            reranker=reranker,
+            question=q,
+            retrieved_docs=retrieved,
+            top_k=top_k,
+            top_K=top_K,
+        )
 
         _, B_i = reranker_fail(reranked, gold_doc_ids, tau_2)
         B_list.append(B_i)
@@ -702,7 +752,6 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
     lambda_s_candidates = cand["lambda_s_candidates"]
 
     retrieve_cache = {}
-    rerank_cache = {}
     gen_cache = {}
 
     raw_results = []
@@ -714,6 +763,7 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
     # -------------------------
     print("Start stage 1+2 search...")
     for top_k in top_k_candidates:
+        rerank_cache = {}
         print(f"[stage12] top_k={top_k}, candidates={top_K_candidates_map[top_k]}")
         for top_K in top_K_candidates_map[top_k]:
             print(f"  evaluating top_k={top_k}, top_K={top_K}")
