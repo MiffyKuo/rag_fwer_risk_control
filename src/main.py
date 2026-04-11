@@ -30,7 +30,7 @@ def main():
         stage12_ratio=0.5,
         use_stage12_tcrcs=True,
         stage12_i1_ratio=0.5,
-        use_stage3_certified_bound=True, # True
+        use_stage3_certified_bound=True,
 
         # 可自行調整
         delta_total=0.10,
@@ -52,6 +52,9 @@ def main():
         api_base=model_cfg.generator_api_base,
         api_key=model_cfg.generator_api_key,
         temperature=model_cfg.temperature,
+        max_concurrent=model_cfg.generator_max_concurrent,
+        request_timeout=model_cfg.generator_request_timeout,
+        max_tokens=model_cfg.generator_max_tokens,
     )
 
     # 4. grid search
@@ -84,9 +87,9 @@ def main():
 
         ranked.sort(
             key=lambda x: (
-                x["gap_to_alpha_total"],   # 越接近 alpha_total 越前面
+                x["gap_to_alpha_total"],
                 x["P(E)_cert"],
-                -x["top_K"],               # 同樣接近時，優先看保留較多文件
+                -x["top_K"],
                 -x["N_rag"],
                 x["lambda_g"],
             )

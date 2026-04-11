@@ -240,6 +240,130 @@ def time_proxy(top_k, top_K, N_rag, lambda_g, avg_doc_tokens=180, L_query=30, L_
     gen_cost = lambda_g * (0.03 * (L_query + N_rag * avg_doc_tokens) + 1.0 * L_out)
     return retrieval_cost + rerank_cost + gen_cost
 
+def _batch_fill_gen_cache(
+    rows,
+    generator,
+    N_rag,
+    lambda_g,
+    lambda_s,
+    gen_cache
+):
+    """
+    將 rows 中尚未存在於 gen_cache 的項目，整批送去 generator。
+    rows 的每個元素需包含:
+        - question
+        - reranked_docs
+    """
+    requests_data = []
+
+    for row in rows:
+        q = row["question"]
+        reranked = row["reranked_docs"]
+
+        contexts = reranked[:N_rag]
+        doc_ids = tuple(d.metadata["doc_id"] for d in contexts)
+        gen_key = (q, doc_ids, lambda_g, lambda_s)
+
+        if gen_key in gen_cache:
+            continue
+
+        prompt = generator.build_prompt(q, contexts)
+        requests_data.append({
+            "user_key": gen_key,
+            "prompt": prompt,
+        })
+
+    if requests_data:
+        batch_outputs = generator.batch_generate_answers(
+            requests_data=requests_data,
+            lambda_g=lambda_g,
+            lambda_s=lambda_s,
+            max_retry=6,
+        )
+        for gen_key, answers in batch_outputs.items():
+            gen_cache[gen_key] = answers
+
+
+def _collect_stage3_rows(
+    calib_data,
+    retriever,
+    reranker,
+    top_k,
+    top_K,
+    tau_1,
+    tau_2,
+    retrieve_cache,
+    rerank_cache
+):
+    """
+    先跑 stage1 + stage2，收集真正要送進 generator 的 rows。
+    回傳:
+        - stage3_rows
+        - A_list
+        - B_list
+        - fail_cases
+        - n_stage1
+        - n_stage2
+    """
+    A_list, B_list = [], []
+    fail_cases = {"retriever": [], "reranker": [], "generator": []}
+    stage3_rows = []
+
+    n_stage1 = 0
+    n_stage2 = 0
+
+    for row in calib_data:
+        qid = row["qid"]
+        q = row["question"]
+        gold_answer = row["gold_answer"]
+
+        gold_doc_ids = row.get("gold_doc_ids")
+        if gold_doc_ids is None:
+            gold_doc_ids = [row["gold_doc_id"]]
+
+        # Stage 1
+        n_stage1 += 1
+        ret_key = (q, top_k)
+        if ret_key not in retrieve_cache:
+            retrieve_cache[ret_key] = retriever.retrieve(q, top_k=top_k)
+        retrieved = retrieve_cache[ret_key]
+
+        _, A_i = retriever_fail(retrieved, gold_doc_ids, tau_1)
+        A_list.append(A_i)
+
+        if A_i == 1:
+            fail_cases["retriever"].append(qid)
+            continue
+
+        # Stage 2
+        n_stage2 += 1
+        rerank_key = (q, top_k, top_K)
+        if rerank_key not in rerank_cache:
+            rerank_cache[rerank_key] = reranker.rerank(q, retrieved, top_K=top_K)
+        reranked = rerank_cache[rerank_key]
+
+        _, B_i = reranker_fail(reranked, gold_doc_ids, tau_2)
+        B_list.append(B_i)
+
+        if B_i == 1:
+            fail_cases["reranker"].append(qid)
+            continue
+
+        stage3_rows.append({
+            "qid": qid,
+            "question": q,
+            "gold_answer": gold_answer,
+            "reranked_docs": reranked,
+        })
+
+    return {
+        "stage3_rows": stage3_rows,
+        "A_list": A_list,
+        "B_list": B_list,
+        "fail_cases": fail_cases,
+        "n_stage1": n_stage1,
+        "n_stage2": n_stage2,
+    }
 
 def evaluate_one_setting(
     calib_data,
@@ -258,72 +382,50 @@ def evaluate_one_setting(
     rerank_cache,
     gen_cache
 ):
-    A_list, B_list, C_list = [], [], []
-    fail_cases = {"retriever": [], "reranker": [], "generator": []}
+    stage12_out = _collect_stage3_rows(
+        calib_data=calib_data,
+        retriever=retriever,
+        reranker=reranker,
+        top_k=top_k,
+        top_K=top_K,
+        tau_1=tau_1,
+        tau_2=tau_2,
+        retrieve_cache=retrieve_cache,
+        rerank_cache=rerank_cache,
+    )
 
-    # 方便 debug：記錄每一關實際有多少題進來
-    n_stage1 = 0
-    n_stage2 = 0
-    n_stage3 = 0
+    stage3_rows = stage12_out["stage3_rows"]
+    A_list = stage12_out["A_list"]
+    B_list = stage12_out["B_list"]
+    fail_cases = stage12_out["fail_cases"]
+    n_stage1 = stage12_out["n_stage1"]
+    n_stage2 = stage12_out["n_stage2"]
 
-    for row in calib_data:
+    n_stage3 = len(stage3_rows)
+
+    # 先把 cache miss 的 generator request 一次送出去
+    _batch_fill_gen_cache(
+        rows=stage3_rows,
+        generator=generator,
+        N_rag=N_rag,
+        lambda_g=lambda_g,
+        lambda_s=lambda_s,
+        gen_cache=gen_cache,
+    )
+
+    # 再逐題計算 generator fail
+    C_list = []
+    for row in stage3_rows:
         qid = row["qid"]
         q = row["question"]
         gold_answer = row["gold_answer"]
-
-        gold_doc_ids = row.get("gold_doc_ids")
-        if gold_doc_ids is None:
-            gold_doc_ids = [row["gold_doc_id"]]
-
-        # --------------------
-        # Stage 1: Retriever
-        # --------------------
-        n_stage1 += 1
-
-        ret_key = (q, top_k)
-        if ret_key not in retrieve_cache:
-            retrieve_cache[ret_key] = retriever.retrieve(q, top_k=top_k)
-        retrieved = retrieve_cache[ret_key]
-
-        _, A_i = retriever_fail(retrieved, gold_doc_ids, tau_1)
-        A_list.append(A_i)
-
-        if A_i == 1:
-            fail_cases["retriever"].append(qid)
-            continue
-
-        # --------------------
-        # Stage 2: Reranker
-        # --------------------
-        n_stage2 += 1
-
-        rerank_key = (q, top_k, top_K)
-        if rerank_key not in rerank_cache:
-            rerank_cache[rerank_key] = reranker.rerank(q, retrieved, top_K=top_K)
-        reranked = rerank_cache[rerank_key]
-
-        _, B_i = reranker_fail(reranked, gold_doc_ids, tau_2)
-        B_list.append(B_i)
-
-        if B_i == 1:
-            fail_cases["reranker"].append(qid)
-            continue
-
-        # --------------------
-        # Stage 3: Generator
-        # --------------------
-        n_stage3 += 1
+        reranked = row["reranked_docs"]
 
         contexts = reranked[:N_rag]
         doc_ids = tuple(d.metadata["doc_id"] for d in contexts)
         gen_key = (q, doc_ids, lambda_g, lambda_s)
 
-        if gen_key not in gen_cache:
-            gen_cache[gen_key] = generator.generate_answers(
-                q, contexts, lambda_g=lambda_g, lambda_s=lambda_s
-            )
         generation_set = gen_cache[gen_key]
-
         _, C_i = generator_fail(generation_set, gold_answer, tau_3=tau_3)
         C_list.append(C_i)
 
@@ -416,6 +518,16 @@ def evaluate_stage12(
 def evaluate_stage3(
     passed_rows, generator, top_k, top_K, N_rag, lambda_g, lambda_s, tau_3, gen_cache
 ):
+    # 先把 cache miss 的 generator request 一次送出去
+    _batch_fill_gen_cache(
+        rows=passed_rows,
+        generator=generator,
+        N_rag=N_rag,
+        lambda_g=lambda_g,
+        lambda_s=lambda_s,
+        gen_cache=gen_cache,
+    )
+
     C_list = []
 
     for row in passed_rows:
@@ -426,11 +538,6 @@ def evaluate_stage3(
         contexts = reranked[:N_rag]
         doc_ids = tuple(d.metadata["doc_id"] for d in contexts)
         gen_key = (q, doc_ids, lambda_g, lambda_s)
-
-        if gen_key not in gen_cache:
-            gen_cache[gen_key] = generator.generate_answers(
-                q, contexts, lambda_g=lambda_g, lambda_s=lambda_s
-            )
 
         generation_set = gen_cache[gen_key]
         _, C_i = generator_fail(generation_set, gold_answer, tau_3=tau_3)
