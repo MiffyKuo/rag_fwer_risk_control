@@ -146,7 +146,7 @@ Answer:
                     request_id=data["id"],
                 )
 
-        connector = aiohttp.TCPConnector(limit=self.max_concurrent + 20)
+        connector = aiohttp.TCPConnector(limit=self.max_concurrent)
         timeout = aiohttp.ClientTimeout(total=self.request_timeout)
 
         async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:

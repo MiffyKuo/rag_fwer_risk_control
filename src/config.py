@@ -79,6 +79,6 @@ class ModelConfig:
     temperature: float = 0.0
 
     # -------- batch / vLLM settings --------
-    generator_max_concurrent: int = int(os.getenv("GENERATOR_MAX_CONCURRENT", "64"))
+    generator_max_concurrent: int = int(os.getenv("GENERATOR_MAX_CONCURRENT", "8")) #64
     generator_request_timeout: int = int(os.getenv("GENERATOR_REQUEST_TIMEOUT", "600"))
     generator_max_tokens: int = int(os.getenv("GENERATOR_MAX_TOKENS", "256"))

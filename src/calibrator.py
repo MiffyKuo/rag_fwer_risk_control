@@ -274,14 +274,20 @@ def _batch_fill_gen_cache(
         })
 
     if requests_data:
-        batch_outputs = generator.batch_generate_answers(
-            requests_data=requests_data,
-            lambda_g=lambda_g,
-            lambda_s=lambda_s,
-            max_retry=6,
-        )
-        for gen_key, answers in batch_outputs.items():
-            gen_cache[gen_key] = answers
+        chunk_size = max(1, generator.max_concurrent)
+
+        for i in range(0, len(requests_data), chunk_size):
+            chunk = requests_data[i:i + chunk_size]
+
+            batch_outputs = generator.batch_generate_answers(
+                requests_data=chunk,
+                lambda_g=lambda_g,
+                lambda_s=lambda_s,
+                max_retry=6,
+            )
+
+            for gen_key, answers in batch_outputs.items():
+                gen_cache[gen_key] = answers
 
 
 def _collect_stage3_rows(
