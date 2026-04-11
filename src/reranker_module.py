@@ -4,6 +4,7 @@ from copy import deepcopy
 
 class SimpleReranker:
     def __init__(self, model_name: str):
+        from sentence_transformers import CrossEncoder
         self.model = CrossEncoder(model_name)
 
     def rerank(self, question: str, docs: list, top_K: int, batch_size: int = 8):
@@ -15,12 +16,14 @@ class SimpleReranker:
             show_progress_bar=False
         )
 
-        scored_docs = []
-        for score, doc in zip(scores, docs):
-            new_doc = deepcopy(doc)
-            new_doc.metadata["rerank_score"] = float(score)
-            scored_docs.append(new_doc)
+        # 不 deepcopy，直接用 index 排序，避免複製整份文件內容
+        scored = list(zip(scores, docs))
+        scored.sort(key=lambda x: float(x[0]), reverse=True)
 
-        scored_docs.sort(key=lambda d: d.metadata["rerank_score"], reverse=True)
-        return scored_docs[:top_K]
+        top_docs = []
+        for score, doc in scored[:top_K]:
+            doc.metadata["rerank_score"] = float(score)
+            top_docs.append(doc)
+
+        return top_docs
     

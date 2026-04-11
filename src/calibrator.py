@@ -461,6 +461,51 @@ def evaluate_one_setting(
         "n_stage3": n_stage3,
     }
 
+def evaluate_stage12_stats_only(
+    calib_data, retriever, reranker, top_k, top_K, tau_1, tau_2,
+    retrieve_cache, rerank_cache
+):
+    A_list, B_list = [], []
+
+    for row in calib_data:
+        q = row["question"]
+
+        gold_doc_ids = row.get("gold_doc_ids")
+        if gold_doc_ids is None:
+            gold_doc_ids = [row["gold_doc_id"]]
+
+        ret_key = (q, top_k)
+        if ret_key not in retrieve_cache:
+            retrieve_cache[ret_key] = retriever.retrieve(q, top_k=top_k)
+        retrieved = retrieve_cache[ret_key]
+
+        _, A_i = retriever_fail(retrieved, gold_doc_ids, tau_1)
+        A_list.append(A_i)
+        if A_i == 1:
+            continue
+
+        rerank_key = (q, top_k, top_K)
+        if rerank_key not in rerank_cache:
+            rerank_cache[rerank_key] = reranker.rerank(q, retrieved, top_K=top_K)
+        reranked = rerank_cache[rerank_key]
+
+        _, B_i = reranker_fail(reranked, gold_doc_ids, tau_2)
+        B_list.append(B_i)
+
+    fwer_1 = sum(A_list) / max(len(A_list), 1)
+    fwer_2 = sum(B_list) / max(len(B_list), 1)
+
+    return {
+        "top_k": top_k,
+        "top_K": top_K,
+        "FWER_1": fwer_1,
+        "FWER_2": fwer_2,
+        "num_fail_1": sum(A_list),
+        "num_fail_2": sum(B_list),
+        "n1": len(A_list),
+        "n2": len(B_list),
+    }
+
 
 def evaluate_stage12(
     calib_data, retriever, reranker, top_k, top_K, tau_1, tau_2,
@@ -681,7 +726,7 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
 
             # 4.1 stage1/2 search on split data (finite-sample style)
             if use_stage12_tcrcs:
-                s12_I1 = evaluate_stage12(
+                s12_I1 = evaluate_stage12_stats_only(
                     calib_data=calib_stage12_I1,
                     retriever=retriever,
                     reranker=reranker,
@@ -692,7 +737,7 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                     retrieve_cache=retrieve_cache,
                     rerank_cache=rerank_cache,
                 )
-                s12_I2 = evaluate_stage12(
+                s12_I2 = evaluate_stage12_stats_only(
                     calib_data=calib_stage12_I2,
                     retriever=retriever,
                     reranker=reranker,
@@ -703,9 +748,7 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                     retrieve_cache=retrieve_cache,
                     rerank_cache=rerank_cache,
                 )
-
-                # 再用 stage3 split 上的資料重新取得真正要送進 generator 的 passed_rows
-                s12_stage3 = evaluate_stage12(
+                s12_stage3_stats = evaluate_stage12_stats_only(
                     calib_data=calib_stage3,
                     retriever=retriever,
                     reranker=reranker,
@@ -726,9 +769,8 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                 s12 = {
                     "top_k": top_k,
                     "top_K": top_K,
-                    "FWER_1": s12_stage3["FWER_1"],
-                    "FWER_2": s12_stage3["FWER_2"],
-                    "passed_rows": s12_stage3["passed_rows"],
+                    "FWER_1": s12_stage3_stats["FWER_1"],
+                    "FWER_2": s12_stage3_stats["FWER_2"],
                     "FWER_1_I1": s12_I1["FWER_1"],
                     "FWER_2_I2": s12_I2["FWER_2"],
                     "num_fail_1_I1": s12_I1["num_fail_1"],
@@ -737,8 +779,7 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                     "n2_I2": s12_I2["n2"],
                 }
             else:
-                # 保留你原本的功能：不 split 時，照原本整份 calibration 搜索
-                s12 = evaluate_stage12(
+                s12 = evaluate_stage12_stats_only(
                     calib_data=calib_stage12,
                     retriever=retriever,
                     reranker=reranker,
@@ -768,6 +809,27 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
     )
     stage12_candidates = stage12_candidates[:search_cfg.max_stage12_candidates]
 
+    # 只對保留下來的少數候選，重建真正要送進 stage3 的 passed_rows
+    rebuilt_stage12_candidates = []
+    for s12 in stage12_candidates:
+        rebuilt = evaluate_stage12(
+            calib_data=calib_stage3 if use_stage12_tcrcs else calib_stage12,
+            retriever=retriever,
+            reranker=reranker,
+            top_k=s12["top_k"],
+            top_K=s12["top_K"],
+            tau_1=risk_cfg.tau_1,
+            tau_2=risk_cfg.tau_2,
+            retrieve_cache=retrieve_cache,
+            rerank_cache=rerank_cache,
+        )
+
+        merged = dict(s12)
+        merged["passed_rows"] = rebuilt["passed_rows"]
+        rebuilt_stage12_candidates.append(merged)
+
+    stage12_candidates = rebuilt_stage12_candidates
+
     print(f"stage12 candidates kept: {len(stage12_candidates)}")
 
     # -------------------------
@@ -793,6 +855,8 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                 for lambda_s in lambda_s_candidates:
                     print(f"    lambda_g={lambda_g}, lambda_s={lambda_s}")
 
+                    local_gen_cache = {}
+
                     s3 = evaluate_stage3(
                         passed_rows=s12["passed_rows"],
                         generator=generator,
@@ -802,7 +866,7 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                         lambda_g=lambda_g,
                         lambda_s=lambda_s,
                         tau_3=risk_cfg.tau_3,
-                        gen_cache=gen_cache,
+                        gen_cache=local_gen_cache,
                     )
 
                     fwer_1 = s12["FWER_1"]

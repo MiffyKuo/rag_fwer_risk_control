@@ -12,6 +12,7 @@ def main():
     corpus_data = load_jsonl("data/corpus.jsonl")
     calib_data = load_jsonl("data/calib.jsonl")
     test_rows = load_jsonl("data/test.jsonl")
+    print(f"[1] done. corpus={len(corpus_data)}, calib={len(calib_data)}, test={len(test_rows)}")
 
     # 2. 建立 config
     risk_cfg = RiskConfig(
@@ -43,10 +44,16 @@ def main():
     model_cfg = ModelConfig()
 
     # 3. 建立模組
+    print("[2] building retriever...")
     retriever = RetrieverModule(model_cfg.embedding_model)
     retriever.build_index(corpus_data)
+    print("[2] retriever ready.")
 
+    print("[3] building reranker...")
     reranker = SimpleReranker(model_cfg.reranker_model)
+    print("[3] reranker ready.")
+
+    print("[4] building generator...")
     generator = GeneratorModule(
         model_name=model_cfg.generator_model,
         api_base=model_cfg.generator_api_base,
@@ -56,8 +63,10 @@ def main():
         request_timeout=model_cfg.generator_request_timeout,
         max_tokens=model_cfg.generator_max_tokens,
     )
+    print("[4] generator ready.")
 
     # 4. grid search
+    print("[5] start grid_search...")
     best_params, all_results, feasible_results = grid_search(
         calib_data=calib_data,
         retriever=retriever,
@@ -66,6 +75,7 @@ def main():
         risk_cfg=risk_cfg,
         search_cfg=search_cfg,
     )
+    print("[5] grid_search done.")
 
     # 5. 搜尋結束後，再一次性存 cache
     generator.save_cache()
