@@ -53,17 +53,17 @@ def main():
     reranker = SimpleReranker(model_cfg.reranker_model, device="cpu")
     print("[3] reranker ready.")
 
-    # print("[4] building generator...")
-    # generator = GeneratorModule(
-    #     model_name=model_cfg.generator_model,
-    #     api_base=model_cfg.generator_api_base,
-    #     api_key=model_cfg.generator_api_key,
-    #     temperature=model_cfg.temperature,
-    #     max_concurrent=model_cfg.generator_max_concurrent,
-    #     request_timeout=model_cfg.generator_request_timeout,
-    #     max_tokens=model_cfg.generator_max_tokens,
-    # )
-    # print("[4] generator ready.")
+    print("[4] building generator...")
+    generator = GeneratorModule(
+        model_name=model_cfg.generator_model,
+        api_base=model_cfg.generator_api_base,
+        api_key=model_cfg.generator_api_key,
+        temperature=model_cfg.temperature,
+        max_concurrent=model_cfg.generator_max_concurrent,
+        request_timeout=model_cfg.generator_request_timeout,
+        max_tokens=model_cfg.generator_max_tokens,
+    )
+    print("[4] generator ready.")
 
     # 4. grid search
     print("[5] start grid_search...")
