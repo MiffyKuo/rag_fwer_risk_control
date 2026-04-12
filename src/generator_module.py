@@ -6,7 +6,6 @@ from typing import List, Dict, Any
 from difflib import SequenceMatcher
 
 import aiohttp
-from langchain_openai import ChatOpenAI
 
 
 class GeneratorModule:
@@ -28,13 +27,6 @@ class GeneratorModule:
         self.max_concurrent = max_concurrent
         self.request_timeout = request_timeout
         self.max_tokens = max_tokens
-
-        self.llm = ChatOpenAI(
-            model=model_name,
-            temperature=temperature,
-            api_key=api_key,
-            base_url=api_base
-        )
 
         self.api_url = self._build_api_url(self.api_base)
 
@@ -131,11 +123,13 @@ Answer:
                 "success": False,
                 "error": str(e)
             }
+    
 
     async def _batch_send_requests_async(
         self,
         prompts_data: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
+        print(f"[vLLM] async batch size = {len(prompts_data)}, max_concurrent = {self.max_concurrent}")
         semaphore = asyncio.Semaphore(self.max_concurrent)
 
         async def send_with_limit(session, data):

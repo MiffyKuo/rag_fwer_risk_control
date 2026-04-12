@@ -71,7 +71,7 @@ class SearchConfig:
 
 @dataclass
 class ModelConfig:
-    embedding_model: str = "sentence-transformers/all-mpnet-base-v2"
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2" # "sentence-transformers/all-mpnet-base-v2"
     reranker_model: str = "BAAI/bge-reranker-base"
     generator_model: str = "openai/gpt-oss-20b"
     generator_api_base: str = os.getenv("GPTOSS_BASE_URL", "")
