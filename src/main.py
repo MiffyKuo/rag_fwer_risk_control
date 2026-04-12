@@ -29,7 +29,7 @@ def main():
         enforce_module_budgets=True,
         use_data_split=True,
         stage12_ratio=0.5,
-        use_stage12_tcrcs=True,
+        use_stage12_tcrcs=False, # True
         stage12_i1_ratio=0.5,
         use_stage3_certified_bound=True,
 

@@ -175,8 +175,7 @@ def auto_top_K_candidates(top_k, mode="auto_sparse"):
 
     elif mode == "auto_sparse":
         vals = {
-            1, 2, 3, 5,
-            max(1, top_k // 4),
+            1,
             max(1, top_k // 2),
             top_k
         }
