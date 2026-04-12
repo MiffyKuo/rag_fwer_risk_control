@@ -55,7 +55,7 @@ class SearchConfig:
     # 最大搜尋範圍
     max_top_k: int = 10  # 原 500
     min_top_k: int = 5   # 原 10
-    add_top_k_buffer: tuple = (0, )  # (0, 1) # 原 (0, 2, 5)
+    add_top_k_buffer: tuple = (0, 1)  # (0, 1) # 原 (0, 2, 5)
 
     # -------- stage 2: reranker --------
     top_K_mode: str = "auto_sparse"

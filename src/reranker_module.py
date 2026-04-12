@@ -8,8 +8,8 @@ class SimpleReranker:
         self.model = CrossEncoder(model_name, device=device)
         self.device = device
 
-    def rerank(self, question: str, docs: list, top_K: int, batch_size: int = 1): # batch_size: int = 8
-        pairs = [(question, doc.page_content[:512]) for doc in docs] # 原本沒有[:512]
+    def rerank(self, question: str, docs: list, top_K: int, batch_size: int = 8): # batch_size: int = 8
+        pairs = [(question, doc.page_content) for doc in docs] # doc.page_content[:512]
 
         with torch.no_grad():
             scores = self.model.predict(
