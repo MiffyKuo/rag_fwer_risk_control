@@ -5,7 +5,7 @@ class SimpleReranker:
     def __init__(self, model_name: str, device: str = "cpu"):
         self.model = CrossEncoder(model_name, device=device)
 
-    def rerank(self, question: str, docs: list, top_K: int, batch_size: int = 8):
+    def rerank(self, question: str, docs: list, top_K: int, batch_size: int = 1): # batch_size: int = 8
         pairs = [(question, doc.page_content) for doc in docs]
 
         scores = self.model.predict(

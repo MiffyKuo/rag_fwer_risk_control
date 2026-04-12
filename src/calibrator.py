@@ -240,14 +240,10 @@ def time_proxy(top_k, top_K, N_rag, lambda_g, avg_doc_tokens=180, L_query=30, L_
     return retrieval_cost + rerank_cost + gen_cost
 
 def _get_retrieved_docs(retrieve_cache, retriever, question, top_k, max_top_k_for_cache=None):
-    """
-    只對每個 question 做一次 retrieval cache。
-    cache 中存該 question 在 max_top_k_for_cache 下的完整結果，再依需求切片。
-    """
     if max_top_k_for_cache is None:
         max_top_k_for_cache = top_k
 
-    ret_key = (question, max_top_k_for_cache)
+    ret_key = question
 
     if ret_key not in retrieve_cache:
         retrieve_cache[ret_key] = retriever.retrieve(question, top_k=max_top_k_for_cache)

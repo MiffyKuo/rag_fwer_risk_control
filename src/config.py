@@ -55,14 +55,14 @@ class SearchConfig:
     # 最大搜尋範圍
     max_top_k: int = 10  # 原 500
     min_top_k: int = 5   # 原 10
-    add_top_k_buffer: tuple = (0, 1)  # 原 (0, 2, 5)
+    add_top_k_buffer: tuple = (0, )  # (0, 1) # 原 (0, 2, 5)
 
     # -------- stage 2: reranker --------
     top_K_mode: str = "auto_sparse"
     min_top_K: int = 2  # 原 3
 
     # -------- stage 3: generator --------
-    fix_n_rag_to_top_K: bool = False  # N_rag是否要等於top-K
+    fix_n_rag_to_top_K: bool = True  # N_rag是否要等於top-K
     max_lambda_g: int = 1             # 只生成1個答案
     lambda_s_candidates: list = field(default_factory=lambda: [0.8])
     max_stage12_candidates: int = 3   # 原 10
