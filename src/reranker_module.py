@@ -1,11 +1,9 @@
 from sentence_transformers import CrossEncoder
-from copy import deepcopy
 
 
 class SimpleReranker:
-    def __init__(self, model_name: str):
-        from sentence_transformers import CrossEncoder
-        self.model = CrossEncoder(model_name)
+    def __init__(self, model_name: str, device: str = "cpu"):
+        self.model = CrossEncoder(model_name, device=device)
 
     def rerank(self, question: str, docs: list, top_K: int, batch_size: int = 8):
         pairs = [(question, doc.page_content) for doc in docs]
@@ -16,7 +14,6 @@ class SimpleReranker:
             show_progress_bar=False
         )
 
-        # 不 deepcopy，直接用 index 排序，避免複製整份文件內容
         scored = list(zip(scores, docs))
         scored.sort(key=lambda x: float(x[0]), reverse=True)
 
@@ -26,4 +23,3 @@ class SimpleReranker:
             top_docs.append(doc)
 
         return top_docs
-    

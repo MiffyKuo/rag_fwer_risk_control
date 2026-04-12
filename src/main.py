@@ -45,12 +45,12 @@ def main():
 
     # 3. 建立模組
     print("[2] building retriever...")
-    retriever = RetrieverModule(model_cfg.embedding_model)
+    retriever = RetrieverModule(model_cfg.embedding_model, device="cpu")
     retriever.build_index(corpus_data)
     print("[2] retriever ready.")
 
     print("[3] building reranker...")
-    reranker = SimpleReranker(model_cfg.reranker_model)
+    reranker = SimpleReranker(model_cfg.reranker_model, device="cpu")
     print("[3] reranker ready.")
 
     print("[4] building generator...")

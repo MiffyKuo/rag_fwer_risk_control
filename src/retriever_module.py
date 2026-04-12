@@ -3,14 +3,14 @@ from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 
+
 class RetrieverModule:
-    def __init__(self, embedding_model: str, device: str = None):
-        if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+    def __init__(self, embedding_model: str, device: str = "cpu"):
+        self.device = device
 
         self.embeddings = HuggingFaceEmbeddings(
             model_name=embedding_model,
-            model_kwargs={"device": device},
+            model_kwargs={"device": self.device},
             encode_kwargs={"normalize_embeddings": True}
         )
         self.vectorstore = None
