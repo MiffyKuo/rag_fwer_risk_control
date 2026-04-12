@@ -299,10 +299,12 @@ def _batch_fill_gen_cache(
 
     if requests_data:
         chunk_size = max(1, generator.max_concurrent)
+        print(f"[GEN] total requests_data = {len(requests_data)}, chunk_size = {chunk_size}")
 
         for i in range(0, len(requests_data), chunk_size):
             chunk = requests_data[i:i + chunk_size]
-
+            print(f"[GEN] sending chunk {i // chunk_size + 1}, batch_size = {len(chunk)}")
+            
             batch_outputs = generator.batch_generate_answers(
                 requests_data=chunk,
                 lambda_g=lambda_g,
