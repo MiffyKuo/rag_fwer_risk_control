@@ -232,11 +232,75 @@ def build_threshold_candidates(calib_data, retriever, reranker, search_cfg):
     }
 
 
-def time_proxy(top_k, top_K, N_rag, lambda_g, avg_doc_tokens=180, L_query=30, L_out=64):
-    # 依照時間近似概念，給 reranker 和 generator 較高權重
-    retrieval_cost = 1.0 * top_k
-    rerank_cost = 4.0 * top_k + 0.5 * top_K
-    gen_cost = lambda_g * (0.03 * (L_query + N_rag * avg_doc_tokens) + 1.0 * L_out)
+def time_proxy(
+    top_k,
+    top_K,
+    N_rag,
+    lambda_g,
+    lambda_s=0.8,
+    avg_doc_tokens=180,
+    L_query=30,
+    L_out=64,
+    corpus_size=None,
+    emb_dim=384,
+):
+    # 依照目前實作的方法做時間近似：
+    # 1) Retriever: HuggingFace embedding + FAISS IndexFlatIP (exact dense retrieval)
+    #    線上查詢成本 = query encode + exact scan + 取出 top-k
+    # 2) Reranker: Cross-encoder 對每個 retrieved doc 各算一次分數，再排序
+    # 3) Generator: 主要成本 = prefill(prompt) + decode(output)，且 lambda_s 會影響重試次數
+
+    # -------------------------
+    # Stage 1: Retriever
+    # -------------------------
+    # query embedding 成本
+    query_encode_cost = 1.0 * L_query
+
+    # FAISS IndexFlatIP 是 exact search，不是 ANN。
+    # 若 corpus_size 固定，這一項對不同 threshold 排序幾乎是常數；
+    # 但保留它可以讓公式更貼近目前方法本身。
+    if corpus_size is None:
+        faiss_search_cost = 0.0
+    else:
+        faiss_search_cost = 2e-6 * corpus_size * emb_dim
+
+    # 取出 top-k 結果、建立回傳清單的額外成本
+    topk_output_cost = 0.02 * top_k
+
+    retrieval_cost = query_encode_cost + faiss_search_cost + topk_output_cost
+
+    # -------------------------
+    # Stage 2: Reranker
+    # -------------------------
+    # Cross-encoder 會對每個 (q, d) pair 各跑一次
+    pair_tokens = L_query + avg_doc_tokens
+
+    # 每篇文件各算一次分數：主成本 ~ O(top_k)
+    rerank_pair_cost = 0.35 * top_k * pair_tokens
+
+    # 分數排序成本：~ O(top_k log top_k)
+    rerank_sort_cost = 0.10 * top_k * math.log2(max(top_k, 2))
+
+    # 最後只取前 top_K，這部分成本很小，但保留
+    rerank_slice_cost = 0.01 * top_K
+
+    rerank_cost = rerank_pair_cost + rerank_sort_cost + rerank_slice_cost
+
+    # -------------------------
+    # Stage 3: Generator
+    # -------------------------
+    # Prompt 長度近似：query + N_rag 篇文件
+    prompt_tokens = L_query + N_rag * avg_doc_tokens
+
+    # 單次生成成本：prefill + decode
+    one_generation_cost = 0.03 * prompt_tokens + 1.0 * L_out
+
+    # lambda_s 越小（要求越不相似），越容易需要額外重試
+    # 這裡用簡單 inflation factor 反映重試成本
+    retry_multiplier = 1.0 + 0.5 * max(0.0, 1.0 - lambda_s)
+
+    gen_cost = lambda_g * retry_multiplier * one_generation_cost
+
     return retrieval_cost + rerank_cost + gen_cost
 
 def _get_retrieved_docs(retrieve_cache, retriever, question, top_k, max_top_k_for_cache=None):
@@ -921,7 +985,14 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                     fwer_3 = s3["FWER_3"]
 
                     pe_hat = end_to_end_fwer(fwer_1, fwer_2, fwer_3)
-                    total_time = time_proxy(top_k, top_K, N_rag, lambda_g)
+                    total_time = time_proxy(
+                        top_k,
+                        top_K,
+                        N_rag,
+                        lambda_g,
+                        lambda_s=lambda_s,
+                        corpus_size=len(retriever.docs),
+                    )
 
                     result = {
                         "top_k": top_k,
