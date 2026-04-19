@@ -17,13 +17,20 @@ def main():
     # 2. 建立 config
     risk_cfg = RiskConfig(
         alpha_total=0.50,
-        allocation_mode="weighted",   # 或 "direct"
+        allocation_mode="adaptive_weighted",   # 或 "direct" / "weighted"
         w_retrieval=0.3,
         w_reranker=0.3,
         w_generator=0.4,
         tau_1=0.2,
         tau_2=0.4,
         tau_3=0.4,
+
+        # adaptive budget
+        pilot_ratio=0.30,
+        pilot_min_rows=12,
+        pilot_max_rows=40,
+        adaptive_budget_eps=0.02,
+        adaptive_blend=0.0,
 
         # 建議開啟
         enforce_module_budgets=True,

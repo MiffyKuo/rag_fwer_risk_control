@@ -12,12 +12,20 @@ class RiskConfig:
 
     # "direct" = 只檢查端到端 P(E) <= alpha_total
     # "weighted" = 先把 alpha_total 分配成 alpha_1, alpha_2, alpha_3
-    allocation_mode: str = "weighted"
+    # "adaptive_weighted" = 先用一小批 calibration data 估計各模組難度，再自動分配 alpha_1, alpha_2, alpha_3
+    allocation_mode: str = "adaptive_weighted"
 
     # 只有 allocation_mode="weighted" 時才會用到
     w_retrieval: float = 0.3
     w_reranker: float = 0.3
     w_generator: float = 0.4
+
+    # adaptive budget settings
+    pilot_ratio: float = 0.30
+    pilot_min_rows: int = 12
+    pilot_max_rows: int = 40
+    adaptive_budget_eps: float = 0.02
+    adaptive_blend: float = 0.0
 
     # 是否同時要求個別模組風險也要 <= 分配到的 alpha_j
     enforce_module_budgets: bool = True

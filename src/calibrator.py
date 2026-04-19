@@ -22,6 +22,158 @@ def allocate_budgets(alpha_total, w1, w2, w3):
     alpha_3 = 1.0 - s ** w3
     return alpha_1, alpha_2, alpha_3
 
+def _normalize_weights(w1, w2, w3, eps=1e-12):
+    vals = [max(float(w1), 0.0) + eps, max(float(w2), 0.0) + eps, max(float(w3), 0.0) + eps]
+    s = sum(vals)
+    return vals[0] / s, vals[1] / s, vals[2] / s
+
+
+def _simple_token_len(text):
+    if text is None:
+        return 0
+    return max(1, len(str(text).strip().split()))
+
+
+def estimate_time_proxy_stats(calib_data, retriever):
+    query_lens = [_simple_token_len(row.get("question", "")) for row in calib_data]
+    answer_lens = [_simple_token_len(row.get("gold_answer", "")) for row in calib_data]
+
+    doc_sample = retriever.docs[:min(len(retriever.docs), 200)]
+    doc_lens = [_simple_token_len(getattr(doc, "page_content", "")) for doc in doc_sample]
+
+    avg_query_tokens = sum(query_lens) / max(len(query_lens), 1)
+    avg_output_tokens = sum(answer_lens) / max(len(answer_lens), 1)
+    avg_doc_tokens = sum(doc_lens) / max(len(doc_lens), 1)
+
+    emb_dim = getattr(getattr(retriever, "index", None), "d", 384)
+    corpus_size = len(getattr(retriever, "docs", []))
+
+    return {
+        "avg_query_tokens": max(1.0, avg_query_tokens),
+        "avg_output_tokens": max(1.0, avg_output_tokens),
+        "avg_doc_tokens": max(1.0, avg_doc_tokens),
+        "emb_dim": emb_dim,
+        "corpus_size": corpus_size,
+    }
+
+
+def get_pilot_setting(search_cfg):
+    top_k = max(search_cfg.min_top_k, min(search_cfg.max_top_k, 5))
+    top_K = min(top_k, max(search_cfg.min_top_K, max(1, top_k // 2)))
+
+    if search_cfg.fix_n_rag_to_top_K:
+        N_rag = top_K
+    else:
+        N_rag = max(search_cfg.min_N_rag, min(top_K, max(1, top_K // 2)))
+
+    lambda_g = 1
+    if len(search_cfg.lambda_s_candidates) > 0:
+        lambda_s = search_cfg.lambda_s_candidates[0]
+    else:
+        lambda_s = 0.8
+
+    return {
+        "top_k": top_k,
+        "top_K": top_K,
+        "N_rag": N_rag,
+        "lambda_g": lambda_g,
+        "lambda_s": lambda_s,
+    }
+
+
+def get_adaptive_allocation(
+    calib_data,
+    retriever,
+    reranker,
+    generator,
+    risk_cfg,
+    search_cfg,
+):
+    manual_w = _normalize_weights(
+        risk_cfg.w_retrieval,
+        risk_cfg.w_reranker,
+        risk_cfg.w_generator
+    )
+
+    if len(calib_data) == 0:
+        return {
+            "w_retrieval": manual_w[0],
+            "w_reranker": manual_w[1],
+            "w_generator": manual_w[2],
+            "pilot_result": None,
+        }
+
+    ratio = min(max(risk_cfg.pilot_ratio, 0.0), 1.0)
+    if ratio <= 0:
+        pilot_rows = list(calib_data)
+    else:
+        pilot_rows, _ = split_rows(
+            calib_data,
+            ratio=ratio,
+            seed=risk_cfg.random_seed + 17
+        )
+
+    if len(pilot_rows) < min(risk_cfg.pilot_min_rows, len(calib_data)):
+        pilot_rows = list(calib_data)
+
+    if len(pilot_rows) > risk_cfg.pilot_max_rows:
+        keep_ratio = risk_cfg.pilot_max_rows / len(pilot_rows)
+        pilot_rows, _ = split_rows(
+            pilot_rows,
+            ratio=keep_ratio,
+            seed=risk_cfg.random_seed + 18
+        )
+
+    pilot_setting = get_pilot_setting(search_cfg)
+
+    pilot_result = evaluate_one_setting(
+        calib_data=pilot_rows,
+        retriever=retriever,
+        reranker=reranker,
+        generator=generator,
+        top_k=pilot_setting["top_k"],
+        top_K=pilot_setting["top_K"],
+        N_rag=pilot_setting["N_rag"],
+        lambda_g=pilot_setting["lambda_g"],
+        lambda_s=pilot_setting["lambda_s"],
+        tau_1=risk_cfg.tau_1,
+        tau_2=risk_cfg.tau_2,
+        tau_3=risk_cfg.tau_3,
+        retrieve_cache={},
+        rerank_cache={},
+        gen_cache={},
+    )
+
+    eps = max(0.0, risk_cfg.adaptive_budget_eps)
+    auto_w = _normalize_weights(
+        pilot_result["FWER_1"] + eps,
+        pilot_result["FWER_2"] + eps,
+        pilot_result["FWER_3"] + eps,
+        eps=0.0
+    )
+
+    blend = min(max(risk_cfg.adaptive_blend, 0.0), 1.0)
+    final_w = _normalize_weights(
+        (1.0 - blend) * auto_w[0] + blend * manual_w[0],
+        (1.0 - blend) * auto_w[1] + blend * manual_w[1],
+        (1.0 - blend) * auto_w[2] + blend * manual_w[2],
+        eps=0.0
+    )
+
+    print(
+        "[adaptive-budget] "
+        f"pilot_rows={len(pilot_rows)}, "
+        f"pilot_setting={pilot_setting}, "
+        f"pilot_fwer=({pilot_result['FWER_1']:.4f}, {pilot_result['FWER_2']:.4f}, {pilot_result['FWER_3']:.4f}), "
+        f"weights=({final_w[0]:.4f}, {final_w[1]:.4f}, {final_w[2]:.4f})"
+    )
+
+    return {
+        "w_retrieval": final_w[0],
+        "w_reranker": final_w[1],
+        "w_generator": final_w[2],
+        "pilot_result": pilot_result,
+    }
 
 def solve_alpha_3(alpha_total, alpha_1, alpha_2):
     denom = (1 - alpha_1) * (1 - alpha_2)
@@ -253,52 +405,32 @@ def time_proxy(
     # -------------------------
     # Stage 1: Retriever
     # -------------------------
-    # query embedding 成本
     query_encode_cost = 1.0 * L_query
 
-    # FAISS IndexFlatIP 是 exact search，不是 ANN。
-    # 若 corpus_size 固定，這一項對不同 threshold 排序幾乎是常數；
-    # 但保留它可以讓公式更貼近目前方法本身。
     if corpus_size is None:
         faiss_search_cost = 0.0
     else:
         faiss_search_cost = 2e-6 * corpus_size * emb_dim
 
-    # 取出 top-k 結果、建立回傳清單的額外成本
     topk_output_cost = 0.02 * top_k
-
     retrieval_cost = query_encode_cost + faiss_search_cost + topk_output_cost
 
     # -------------------------
     # Stage 2: Reranker
     # -------------------------
-    # Cross-encoder 會對每個 (q, d) pair 各跑一次
     pair_tokens = L_query + avg_doc_tokens
-
-    # 每篇文件各算一次分數：主成本 ~ O(top_k)
     rerank_pair_cost = 0.35 * top_k * pair_tokens
-
-    # 分數排序成本：~ O(top_k log top_k)
     rerank_sort_cost = 0.10 * top_k * math.log2(max(top_k, 2))
-
-    # 最後只取前 top_K，這部分成本很小，但保留
     rerank_slice_cost = 0.01 * top_K
-
     rerank_cost = rerank_pair_cost + rerank_sort_cost + rerank_slice_cost
 
     # -------------------------
     # Stage 3: Generator
     # -------------------------
-    # Prompt 長度近似：query + N_rag 篇文件
     prompt_tokens = L_query + N_rag * avg_doc_tokens
-
-    # 單次生成成本：prefill + decode
     one_generation_cost = 0.03 * prompt_tokens + 1.0 * L_out
 
-    # lambda_s 越小（要求越不相似），越容易需要額外重試
-    # 這裡用簡單 inflation factor 反映重試成本
     retry_multiplier = 1.0 + 0.5 * max(0.0, 1.0 - lambda_s)
-
     gen_cost = lambda_g * retry_multiplier * one_generation_cost
 
     return retrieval_cost + rerank_cost + gen_cost
@@ -754,9 +886,33 @@ def evaluate_fixed_params_on_dataset(
 
 def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg):
     # -------------------------
+    # 0. adaptive runtime stats
+    # -------------------------
+    time_stats = estimate_time_proxy_stats(calib_data, retriever)
+
+    # -------------------------
     # 1. alpha allocation
     # -------------------------
-    if risk_cfg.allocation_mode == "weighted":
+    adaptive_info = None
+
+    if risk_cfg.allocation_mode == "adaptive_weighted":
+        adaptive_info = get_adaptive_allocation(
+            calib_data=calib_data,
+            retriever=retriever,
+            reranker=reranker,
+            generator=generator,
+            risk_cfg=risk_cfg,
+            search_cfg=search_cfg,
+        )
+
+        alpha_1, alpha_2, alpha_3 = allocate_budgets(
+            risk_cfg.alpha_total,
+            adaptive_info["w_retrieval"],
+            adaptive_info["w_reranker"],
+            adaptive_info["w_generator"]
+        )
+
+    elif risk_cfg.allocation_mode == "weighted":
         alpha_1, alpha_2, alpha_3 = allocate_budgets(
             risk_cfg.alpha_total,
             risk_cfg.w_retrieval,
@@ -871,7 +1027,7 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                     rerank_cache=rerank_cache,
                 )
 
-                if risk_cfg.allocation_mode == "weighted" and risk_cfg.enforce_module_budgets:
+                if risk_cfg.allocation_mode in ("weighted", "adaptive_weighted") and risk_cfg.enforce_module_budgets:
                     if not finite_sample_pass(s12_I1["num_fail_1"], s12_I1["n1"], alpha_1):
                         continue
                     if not finite_sample_pass(s12_I2["num_fail_2"], s12_I2["n2"], alpha_2):
@@ -986,12 +1142,16 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
 
                     pe_hat = end_to_end_fwer(fwer_1, fwer_2, fwer_3)
                     total_time = time_proxy(
-                        top_k,
-                        top_K,
-                        N_rag,
-                        lambda_g,
+                        top_k=top_k,
+                        top_K=top_K,
+                        N_rag=N_rag,
+                        lambda_g=lambda_g,
                         lambda_s=lambda_s,
-                        corpus_size=len(retriever.docs),
+                        avg_doc_tokens=time_stats["avg_doc_tokens"],
+                        L_query=time_stats["avg_query_tokens"],
+                        L_out=time_stats["avg_output_tokens"],
+                        corpus_size=time_stats["corpus_size"],
+                        emb_dim=time_stats["emb_dim"],
                     )
 
                     result = {
@@ -1007,10 +1167,15 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                         "time_proxy": total_time,
                     }
 
-                    if risk_cfg.allocation_mode == "weighted":
+                    if risk_cfg.allocation_mode in ("weighted", "adaptive_weighted"):
                         result["alpha_1"] = alpha_1
                         result["alpha_2"] = alpha_2
                         result["alpha_3"] = alpha_3
+
+                    if adaptive_info is not None:
+                        result["w_retrieval_used"] = adaptive_info["w_retrieval"]
+                        result["w_reranker_used"] = adaptive_info["w_reranker"]
+                        result["w_generator_used"] = adaptive_info["w_generator"]
 
                     # 保留 split finite-sample 的診斷資訊
                     if "FWER_1_I1" in s12:
@@ -1022,7 +1187,7 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                         result["n2_I2"] = s12["n2_I2"]
 
                     # certified generator bound
-                    if use_stage3_certified_bound and risk_cfg.allocation_mode == "weighted":
+                    if use_stage3_certified_bound and risk_cfg.allocation_mode in ("weighted", "adaptive_weighted"):
                         alpha_3_hat = hb_upper_bound(
                             r_hat=fwer_3,
                             n=s3["n3"],
@@ -1039,7 +1204,7 @@ def grid_search(calib_data, retriever, reranker, generator, risk_cfg, search_cfg
                         else:
                             feasible = result["P(E)_cert"] <= risk_cfg.alpha_total + risk_cfg.safety_margin
                     else:
-                        if risk_cfg.allocation_mode == "weighted":
+                        if risk_cfg.allocation_mode in ("weighted", "adaptive_weighted"):
                             if risk_cfg.enforce_module_budgets:
                                 feasible = (
                                     fwer_1 <= alpha_1 + risk_cfg.safety_margin
