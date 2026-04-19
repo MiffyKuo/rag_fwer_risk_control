@@ -23,7 +23,7 @@ def main():
         w_generator=0.4,
         tau_1=0.2,
         tau_2=0.4,
-        tau_3=0.4,
+        tau_3=0.6,
 
         # adaptive budget
         pilot_ratio=0.30,
