@@ -63,15 +63,15 @@ class SearchConfig:
     # 最大搜尋範圍
     max_top_k: int = 500  # 原 500
     min_top_k: int = 10   # 原 10
-    add_top_k_buffer: tuple = (0, 2, 5)  # (0, 1) # 原 (0, 2, 5)
+    add_top_k_buffer: tuple = (0, 1)  # (0, 1) # 原 (0, 2, 5)
 
     # -------- stage 2: reranker --------
     top_K_mode: str = "auto_sparse"
     min_top_K: int = 3  # 原 3
 
     # -------- stage 3: generator --------
-    fix_n_rag_to_top_K: bool = True  # N_rag是否要等於top-K
-    max_lambda_g: int = 2             # 只生成1個答案
+    fix_n_rag_to_top_K: bool = False  # N_rag是否要等於top-K
+    max_lambda_g: int = 1             # 只生成1個答案
     lambda_s_candidates: list = field(default_factory=lambda: [0.8])
     max_stage12_candidates: int = 10   # 原 10
     min_N_rag: int = 1
@@ -87,6 +87,6 @@ class ModelConfig:
     temperature: float = 0.0
 
     # -------- batch / vLLM settings --------
-    generator_max_concurrent: int = int(os.getenv("GENERATOR_MAX_CONCURRENT", "8")) #64
+    generator_max_concurrent: int = int(os.getenv("GENERATOR_MAX_CONCURRENT", "64")) #64 or 8
     generator_request_timeout: int = int(os.getenv("GENERATOR_REQUEST_TIMEOUT", "600"))
     generator_max_tokens: int = int(os.getenv("GENERATOR_MAX_TOKENS", "256"))
